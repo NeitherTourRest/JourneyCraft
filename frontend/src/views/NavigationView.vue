@@ -169,6 +169,11 @@ const nodeSearchResults = ref<any[]>([])
 const nodeSearchLoading = ref(false)
 let nodeSearchTimer: ReturnType<typeof setTimeout> | null = null
 
+watch(activeTab, () => {
+  nodeSearchResults.value = []
+  nodeSearchKeyword.value = ''
+})
+
 async function loadNodes() {
   if (!scenicIdInput.value) {
     ElMessage.warning('请输入景区 ID')
@@ -249,6 +254,7 @@ function handleScenicSelect(item: any) {
 const popupNode = ref<PathNode | null>(null)
 const popupPixel = ref<{ x: number; y: number } | null>(null)
 let popupTimer: ReturnType<typeof setTimeout> | null = null
+let emptyClickMarker: any | null = null
 
 function handleMarkerClick(node: PathNode, lng: number, lat: number) {
   if (popupTimer) clearTimeout(popupTimer)
@@ -297,10 +303,23 @@ function onMapClick(lnglat: [number, number]) {
     const map = mapRef.value?.getMap()
     if (map) map.setCenter([gcjLng, gcjLat])
   } else {
-    // No node nearby — visual feedback only
-    mapRef.value?.addMarker(lnglat[0], lnglat[1], {
+    // Remove previous empty-click dot if exists
+    if (emptyClickMarker) {
+      try { mapRef.value?.getMap()?.remove(emptyClickMarker) } catch {}
+      emptyClickMarker = null
+    }
+    const marker = mapRef.value?.addMarker(lnglat[0], lnglat[1], {
       content: '<div style="width:12px;height:12px;background:var(--el-color-primary);border-radius:50%;opacity:0.6"></div>',
     })
+    if (marker) {
+      emptyClickMarker = marker
+      setTimeout(() => {
+        if (emptyClickMarker) {
+          try { mapRef.value?.getMap()?.remove(emptyClickMarker) } catch {}
+          emptyClickMarker = null
+        }
+      }, 2000)
+    }
     ElMessage.info('该位置附近未找到路网节点')
   }
 }
@@ -408,7 +427,6 @@ function focusNodeOnMap(node: any) {
   if (!pathNode || !mapRef.value) return
 
   const [lng, lat] = wgs84ToGcj02(pathNode.longitude, pathNode.latitude)
-  mapRef.value.clearOverlays()
   markNodesOnMap()
   mapRef.value.addMarker(lng, lat, {
     content: `<div style="background:#FF6B35;color:white;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:600">${pathNode.name}</div>`,
@@ -420,6 +438,19 @@ function focusNodeOnMap(node: any) {
 
   // Trigger the marker popup for this node
   handleMarkerClick(pathNode, lng, lat)
+}
+
+function setAsStartFromSearch(node: any) {
+  const pathNode = nodes.value.find((n) => n.nodeId === (node.id ?? node.nodeId))
+  if (pathNode) setAsStart(pathNode)
+  nodeSearchResults.value = []
+  nodeSearchKeyword.value = ''
+}
+function addAsEndFromSearch(node: any) {
+  const pathNode = nodes.value.find((n) => n.nodeId === (node.id ?? node.nodeId))
+  if (pathNode) addAsEnd(pathNode)
+  nodeSearchResults.value = []
+  nodeSearchKeyword.value = ''
 }
 
 // ──────────────────────────────────────────────
@@ -646,7 +677,7 @@ function markPhotoSpotsOnMap() {
   mapRef.value.clearOverlays()
   closePopup()
   for (const spot of photoSpots.value) {
-    const [lng, lat] = wgs84ToGcj02(spot.latitude, spot.longitude)
+    const [lng, lat] = wgs84ToGcj02(spot.longitude, spot.latitude)
     mapRef.value.addTextMarker(lng, lat, `📷 ${spot.name}`, '#E040FB')
   }
   mapRef.value.setFitView()
@@ -797,11 +828,22 @@ function fabReset() {
 }
 
 // ──────────────────────────────────────────────
+// Keyboard handler
+// ──────────────────────────────────────────────
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    closeMenu()
+    closePopup()
+  }
+}
+
+// ──────────────────────────────────────────────
 // Lifecycle
 // ──────────────────────────────────────────────
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  window.addEventListener('keydown', handleKeydown)
 
   // Restore session memory
   const saved = localStorage.getItem(SESSION_KEY)
@@ -820,6 +862,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -907,10 +950,15 @@ onUnmounted(() => {
                 v-for="r in nodeSearchResults"
                 :key="r.id || r.nodeId"
                 class="search-result-item"
-                @click="focusNodeOnMap(r)"
               >
-                <span class="result-name">{{ r.name }}</span>
-                <span class="result-type">{{ getNodeTypeLabel(r.nodeType) }}</span>
+                <div class="result-main" @click="focusNodeOnMap(r)">
+                  <span class="result-name">{{ r.name }}</span>
+                  <span class="result-type">{{ getNodeTypeLabel(r.nodeType) }}</span>
+                </div>
+                <div class="result-actions">
+                  <button class="result-btn result-btn-start" @click.stop="setAsStartFromSearch(r)" title="设为起点">🟢</button>
+                  <button class="result-btn result-btn-end" @click.stop="addAsEndFromSearch(r)" title="设为终点">🟠</button>
+                </div>
               </div>
             </div>
             <div v-else-if="nodeSearchKeyword && !nodeSearchLoading" class="search-empty">
@@ -1263,7 +1311,7 @@ onUnmounted(() => {
               <span>🟠</span> 设为终点
             </button>
             <button class="menu-btn menu-btn-waypoint" @click="menuAddWaypoint">
-              <span>⚪</span> 加入路径
+              <span>⚪</span> {{ isMultiTarget ? '加入路径(下一站)' : '加入路径' }}
             </button>
             <button class="menu-btn menu-btn-focus" @click="menuFocusNode">
               <span>📍</span> 地图聚焦
@@ -1717,12 +1765,10 @@ onUnmounted(() => {
 
 .search-result-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
   border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+  transition: background 0.15s;
 }
 
 .search-result-item:hover {
@@ -1732,6 +1778,32 @@ onUnmounted(() => {
 .search-result-item:last-child {
   border-bottom: none;
 }
+
+.result-main {
+  flex: 1;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.result-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.result-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.result-btn:hover { background: var(--el-fill-color-light, #f5f7fa); }
 
 .result-name {
   font-size: 13px;
