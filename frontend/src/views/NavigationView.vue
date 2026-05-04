@@ -10,6 +10,7 @@ import { ElMessage } from 'element-plus'
 import { Search, Location, Close, RefreshRight, FullScreen } from '@element-plus/icons-vue'
 import { useNavigation } from '@/composables/useNavigation'
 import { request } from '@/api/request'
+import { scenicApi } from '@/api/modules/scenic'
 import { wgs84ToGcj02, pathNodesToGcj02 } from '@/utils/coord'
 import AmapContainer from '@/components/map/AmapContainer.vue'
 import type { PathNode, NodeCongestion, NearbyFacility, PhotoSpot } from '@/types/navigation'
@@ -149,6 +150,7 @@ function onMapReady() {
 // Scenic ID input & node loading
 // ──────────────────────────────────────────────
 const scenicIdInput = ref<number | null>(null)
+const searchKeyword = ref('')
 const nodes = ref<PathNode[]>([])
 const nodesLoading = ref(false)
 const nodesLoadedSuccess = ref(false)
@@ -197,6 +199,27 @@ async function loadNodes() {
   } finally {
     nodesLoading.value = false
   }
+}
+
+async function querySearchScenic(queryString: string, cb: (results: any[]) => void) {
+  if (!queryString || queryString.length < 1) { cb([]); return }
+  try {
+    const res = await scenicApi.search({ keyword: queryString, page: 1, size: 10 })
+    const apiData = res.data as any
+    if (apiData.code !== 200) { cb([]); return }
+    const list = apiData.data?.list || []
+    const results = list.map((item: any) => ({
+      value: `${item.name} (${item.city || '未知城市'})`,
+      scenicId: item.id,
+    }))
+    cb(results)
+  } catch { cb([]) }
+}
+
+function handleScenicSelect(item: any) {
+  scenicIdInput.value = item.scenicId
+  searchKeyword.value = item.value
+  if (item.scenicId) loadNodes()
 }
 
 // ──────────────────────────────────────────────
@@ -702,53 +725,35 @@ onUnmounted(() => {
           <p class="welcome-desc">输入景区 ID 加载路网节点，在地图上选择起点和终点即可规划游览路径。</p>
 
           <div class="welcome-search">
-            <div class="welcome-search-row">
-              <el-input-number
-                v-model="scenicIdInput"
-                :min="1"
-                :controls="false"
-                placeholder="输入景区 ID 加载路网..."
-                class="scenic-input"
-                size="large"
-              />
-              <el-button
-                type="primary"
-                size="large"
-                :loading="nodesLoading"
-                :icon="Search"
-                @click="loadNodes"
-              >
-                加载路网
-              </el-button>
-            </div>
-            <p class="welcome-hint">💡 示例: 故宫 = 景区 ID 1</p>
+            <el-autocomplete
+              v-model="searchKeyword"
+              :fetch-suggestions="querySearchScenic"
+              placeholder='搜索景区名称（如"故宫"）'
+              :trigger-on-focus="false"
+              prefix-icon="Search"
+              size="large"
+              class="scenic-search-input"
+              @select="handleScenicSelect"
+            />
+            <p class="welcome-hint">💡 提示: 输入景区名称搜索，如"故宫"、"颐和园"</p>
             <p v-if="lastScenicHint" class="welcome-hint session-hint">{{ lastScenicHint }}</p>
           </div>
         </div>
 
         <!-- ══ REGULAR CONTENT (when nodes loaded) ══ -->
         <template v-else>
-          <!------ Scenic ID (compact) + success indicator ------>
+          <!------ Scenic search (compact, for switching) ------>
           <div class="panel-section">
-            <label class="section-label">景区 ID</label>
-            <div class="load-row">
-              <el-input-number
-                v-model="scenicIdInput"
-                :min="1"
-                :controls="false"
-                placeholder="输入景区 ID"
-                class="scenic-input"
-                size="default"
-              />
-              <el-button
-                type="primary"
-                :loading="nodesLoading"
-                :icon="Search"
-                @click="loadNodes"
-              >
-                加载
-              </el-button>
-            </div>
+            <el-autocomplete
+              v-model="searchKeyword"
+              :fetch-suggestions="querySearchScenic"
+              placeholder="切换到其他景区..."
+              :trigger-on-focus="false"
+              prefix-icon="Search"
+              size="default"
+              class="scenic-search-input"
+              @select="handleScenicSelect"
+            />
             <div v-if="nodesLoadedSuccess && !nodesLoading" class="load-success-inline">
               <span class="success-check">✓</span> 已加载 {{ nodesLoadedCount }} 个路网节点
             </div>
@@ -1355,6 +1360,10 @@ onUnmounted(() => {
 
 .scenic-input {
   flex: 1;
+}
+
+.scenic-search-input {
+  width: 100%;
 }
 
 .full-width {
