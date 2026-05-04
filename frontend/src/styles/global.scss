@@ -1,0 +1,70 @@
+// JourneyCraft Global Styles
+@use 'variables' as *;
+
+// ──────────────────────────────────────────────
+// CSS Reset
+// ──────────────────────────────────────────────
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  color: $color-text;
+  background-color: $color-bg;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// ──────────────────────────────────────────────
+// Scrollbar (WebKit)
+// ──────────────────────────────────────────────
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+// ──────────────────────────────────────────────
+// Breakpoints
+// ──────────────────────────────────────────────
+$breakpoint-mobile: 768px;
+$breakpoint-tablet: 1024px;
+$breakpoint-desktop: 1440px;
+
+// ──────────────────────────────────────────────
+// Page Container
+// ──────────────────────────────────────────────
+.page-container {
+  padding: 16px;
+
+  @media (min-width: $breakpoint-tablet) {
+    padding: 24px;
+  }
+}
+
+// ──────────────────────────────────────────────
+// Layout Refinements
+// ──────────────────────────────────────────────
+.app-sidebar {
+  overflow-y: auto; // Scrollable when items overflow
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.app-main {
+  min-height: calc(100vh - 56px); // header height
+}

@@ -1,0 +1,13 @@
+// Element Plus CSS Variable Overrides — JourneyCraft Travel Theme
+@use './variables.scss' as *;
+
+:root {
+  --el-color-primary: #{$color-primary};
+  --el-color-primary-light-3: #{$color-primary-light};
+  --el-color-primary-dark-2: #{$color-primary-dark};
+
+  --el-color-success: #{$color-success};
+  --el-color-warning: #{$color-warning};
+  --el-color-danger: #{$color-danger};
+  --el-color-info: #{$color-info};
+}
