@@ -179,6 +179,8 @@ async function loadNodes() {
     ElMessage.warning('请输入景区 ID')
     return
   }
+  // Clear old nodes first — prevents stale data if load fails
+  nodes.value = []
   nodesLoading.value = true
   nodesLoadedSuccess.value = false
   try {
@@ -239,7 +241,10 @@ async function querySearchScenic(queryString: string, cb: (results: any[]) => vo
       scenicId: item.id,
     }))
     cb(results)
-  } catch { cb([]) }
+  } catch {
+    ElMessage.warning('景区搜索暂不可用')
+    cb([])
+  }
 }
 
 function handleScenicSelect(item: any) {
@@ -385,16 +390,19 @@ const filteredNodes = computed(() => {
 // ──────────────────────────────────────────────
 // API node search (debounced)
 // ──────────────────────────────────────────────
-function onNodeSearchInput(val: string) {
+function onNodeSearchInput(_val: string) {
   if (nodeSearchTimer) clearTimeout(nodeSearchTimer)
-  if (!val || val.length < 1) { nodeSearchResults.value = []; return }
+  // Read keyword reactively — val may be stale by the time debounce fires
+  if (!nodeSearchKeyword.value || nodeSearchKeyword.value.length < 1) { nodeSearchResults.value = []; return }
 
   nodeSearchTimer = setTimeout(async () => {
     if (!nav.scenicAreaId.value) return
+    const keyword = nodeSearchKeyword.value  // capture latest at fire time
+    if (!keyword) return
     nodeSearchLoading.value = true
     try {
       const res = await request.get<any>('/api/navigation/nodes/search', {
-        params: { scenicAreaId: nav.scenicAreaId.value, keyword: val, pageSize: 20, pageNum: 1 },
+        params: { scenicAreaId: nav.scenicAreaId.value, keyword, pageSize: 20, pageNum: 1 },
       })
       const apiData = res.data as any
       // Check for 404 or not-implemented
@@ -556,6 +564,7 @@ function clearRoute() {
 
 function resetAll() {
   nav.reset()
+  nav.scenicAreaId.value = null  // clear stale scenic ID
   nodes.value = []
   scenicIdInput.value = null
   nodesLoadedSuccess.value = false
