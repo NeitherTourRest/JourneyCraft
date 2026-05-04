@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // ──── Polyfill window for Node test environment ────
