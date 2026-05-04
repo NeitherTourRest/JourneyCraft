@@ -250,6 +250,9 @@ async function querySearchScenic(queryString: string, cb: (results: any[]) => vo
 function handleScenicSelect(item: any) {
   scenicIdInput.value = item.scenicId
   searchKeyword.value = item.value
+  // Clear stale node search results before loading new scenic
+  nodeSearchResults.value = []
+  nodeSearchKeyword.value = ''
   if (item.scenicId) loadNodes()
 }
 
@@ -292,6 +295,7 @@ function setEndFromPopup() {
 // ──────────────────────────────────────────────
 function onMapClick(lnglat: [number, number]) {
   closeMenu()
+  closePopup()
   if (nodes.value.length === 0) return
 
   // Convert GCJ-02 (AMap coordinate) to WGS-84 for node lookup
@@ -435,7 +439,7 @@ function focusNodeOnMap(node: any) {
   if (!pathNode || !mapRef.value) return
 
   const [lng, lat] = wgs84ToGcj02(pathNode.longitude, pathNode.latitude)
-  markNodesOnMap()
+  // Don't call markNodesOnMap() here — it calls clearOverlays() which destroys drawn routes
   mapRef.value.addMarker(lng, lat, {
     content: `<div style="background:#FF6B35;color:white;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:600">${pathNode.name}</div>`,
   })
@@ -571,11 +575,17 @@ function resetAll() {
   nodesLoadedCount.value = 0
   mapRef.value?.clearOverlays()
   closePopup()
+  closeMenu()
   nearbyFacilities.value = []
   photoSpots.value = []
   selectedFacilityNodeId.value = null
   facilityTypeFilter.value = undefined
   activeTab.value = 'route'
+  // Clear stale search state
+  searchKeyword.value = ''
+  nodeSearch.value = ''
+  nodeSearchResults.value = []
+  nodeSearchKeyword.value = ''
   ElMessage.success('已重置全部')
 }
 
