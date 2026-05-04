@@ -61,18 +61,6 @@ onMounted(async () => {
       console.log('[AmapContainer] 地图瓦片加载完成')
     })
 
-    void setTimeout(() => {
-      if (!map) return  // 组件已卸载，忽略
-      console.warn('[AmapContainer] 地图瓦片加载超时。可能原因：安全密钥错误 / Key 类型不是 Web端(JS API) / 域名未在白名单中')
-      loadErrorMsg.value = [
-        '地图瓦片加载超时，请检查：',
-        '1. 安全密钥 (AMAP_SECURITY_CODE) 是否正确',
-        '2. Key 是否为 "Web端(JS API)" 类型',
-        '3. 域名 http://localhost:5173 是否已添加白名单',
-      ].join('\n')
-      loadFailed.value = true
-    }, 10000)
-
     map.on('click', (e: any) => {
       emit('click', [e.lnglat.getLng(), e.lnglat.getLat()])
     })
