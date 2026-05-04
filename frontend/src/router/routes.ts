@@ -2,6 +2,7 @@ import type { RouteRecordRaw } from 'vue-router'
 
 const LoginView = () => import('@/views/LoginView.vue')
 const RegisterView = () => import('@/views/RegisterView.vue')
+const NavigationView = () => import('@/views/NavigationView.vue')
 const PlaceholderPage = () => import('@/views/PlaceholderPage.vue')
 const NotFound = () => import('@/views/NotFound.vue')
 
@@ -31,7 +32,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/navigation/:scenicId?',
     name: 'Navigation',
-    component: PlaceholderPage,
+    component: NavigationView,
     meta: { requiresAuth: true, title: '导航' },
   },
   {
