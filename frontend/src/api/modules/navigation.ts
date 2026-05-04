@@ -1,4 +1,4 @@
-import request from '@/api/request'
+import { request } from '@/api/request'
 import type { RouteResult, MultiRouteResult, CongestionData, NearbyFacility, PhotoSpot } from '@/types/navigation'
 
 export const navigationApi = {
