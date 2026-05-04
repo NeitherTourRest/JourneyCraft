@@ -163,7 +163,11 @@ async function loadNodes() {
   nodesLoadedSuccess.value = false
   try {
     const res = await request.get<any[]>('/api/navigation/nodes/scenic/' + scenicIdInput.value)
-    const data = (res.data as any).data
+    const apiData = res.data as any
+    if (apiData.code !== 200) {
+      throw new Error(apiData.message || `请求失败 (${apiData.code})`)
+    }
+    const data = apiData.data
     nodes.value = (Array.isArray(data) ? data : []) as PathNode[]
     nav.scenicAreaId.value = scenicIdInput.value
 
