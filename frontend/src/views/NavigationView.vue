@@ -11,7 +11,7 @@ import { Search, Location, Close, RefreshRight, FullScreen } from '@element-plus
 import { useNavigation } from '@/composables/useNavigation'
 import { request } from '@/api/request'
 import { scenicApi } from '@/api/modules/scenic'
-import { wgs84ToGcj02, pathNodesToGcj02 } from '@/utils/coord'
+import { wgs84ToGcj02, pathNodesToGcj02, gcj02ToWgs84, findNearestNode } from '@/utils/coord'
 import AmapContainer from '@/components/map/AmapContainer.vue'
 import type { PathNode, NodeCongestion, NearbyFacility, PhotoSpot } from '@/types/navigation'
 
@@ -135,6 +135,11 @@ const photoSpots = ref<PhotoSpot[]>([])
 const photoSpotsLoading = ref(false)
 
 // ──────────────────────────────────────────────
+// Pick mode (map click to select start/end)
+// ──────────────────────────────────────────────
+const pickMode = ref<'start' | 'end' | null>(null)
+
+// ──────────────────────────────────────────────
 // Map
 // ──────────────────────────────────────────────
 const mapRef = ref<InstanceType<typeof AmapContainer> | null>(null)
@@ -253,6 +258,50 @@ function setStartFromPopup() {
 function setEndFromPopup() {
   if (popupNode.value) addAsEnd(popupNode.value)
   closePopup()
+}
+
+// ──────────────────────────────────────────────
+// Map click → pick start/end node
+// ──────────────────────────────────────────────
+function setPickMode(mode: 'start' | 'end' | null) {
+  pickMode.value = mode
+  if (mode) ElMessage.info(`地图点击模式：${mode === 'start' ? '选择起点' : '选择终点'} — 点击地图上的位置`)
+  else ElMessage.info('已关闭地图选点模式')
+}
+
+function onMapClick(lnglat: [number, number]) {
+  if (!pickMode.value || nodes.value.length === 0) return
+
+  // Convert GCJ-02 (AMap coordinate) to WGS-84
+  const [wgsLng, wgsLat] = gcj02ToWgs84(lnglat[0], lnglat[1])
+
+  // Find nearest node among loaded nodes
+  const result = findNearestNode(wgsLng, wgsLat, nodes.value, 200)
+
+  if (!result) {
+    ElMessage.warning('附近未找到路网节点（距离 > 200 米）')
+    return
+  }
+
+  // Visual feedback: show where user clicked
+  if (mapRef.value) {
+    mapRef.value.addMarker(lnglat[0], lnglat[1], {
+      content: '<div style="width:16px;height:16px;border:3px solid #FF6B35;border-radius:50%;background:rgba(255,107,53,0.2);animation:pulse 1s infinite"></div>',
+    })
+  }
+
+  // Set node as start or end based on mode
+  if (pickMode.value === 'start') {
+    nav.setStartNode(result.node.nodeId)
+    markNodesOnMap()
+  } else {
+    addAsEnd(result.node)
+  }
+
+  ElMessage.success(`已${pickMode.value === 'start' ? '设置起点' : '添加终点'}: ${result.node.name} (距离 ${result.distance}m)`)
+
+  // Exit pick mode after selection
+  pickMode.value = null
 }
 
 // ──────────────────────────────────────────────
@@ -878,6 +927,29 @@ onUnmounted(() => {
             <p class="empty-hint">尚未加载路网节点</p>
           </div>
 
+          <!------ Map click pick mode ------>
+          <div class="panel-section">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <el-button
+                size="small"
+                :type="pickMode === 'start' ? 'success' : 'default'"
+                @click="setPickMode(pickMode === 'start' ? null : 'start')"
+                :disabled="!nodes.length"
+              >
+                📍 选起点
+              </el-button>
+              <el-button
+                size="small"
+                :type="pickMode === 'end' ? 'warning' : 'default'"
+                @click="setPickMode(pickMode === 'end' ? null : 'end')"
+                :disabled="!nodes.length"
+              >
+                📍 选终点
+              </el-button>
+            </div>
+            <p v-if="pickMode" style="font-size:12px;color:var(--el-color-primary);margin:4px 0 0">点击地图选择{{ pickMode === 'start' ? '起点' : '终点' }}</p>
+          </div>
+
           <!------ Plan button ------>
           <div class="panel-section panel-actions">
             <el-button
@@ -1086,6 +1158,7 @@ onUnmounted(() => {
         :center="mapCenter"
         :zoom="16"
         @ready="onMapReady"
+        @click="onMapClick"
       />
 
       <!-- Panel toggle button (mobile) -->
