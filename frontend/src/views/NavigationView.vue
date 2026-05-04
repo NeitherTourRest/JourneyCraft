@@ -6,17 +6,95 @@
  */
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Location, Close, RefreshRight } from '@element-plus/icons-vue'
+import { Search, Location, Close, RefreshRight, FullScreen } from '@element-plus/icons-vue'
 import { useNavigation } from '@/composables/useNavigation'
 import { request } from '@/api/request'
 import { wgs84ToGcj02, pathNodesToGcj02 } from '@/utils/coord'
 import AmapContainer from '@/components/map/AmapContainer.vue'
-import type { PathNode } from '@/types/navigation'
+import type { PathNode, NodeCongestion, NearbyFacility, PhotoSpot } from '@/types/navigation'
 
 // ──────────────────────────────────────────────
 // Navigation composable
 // ──────────────────────────────────────────────
 const nav = useNavigation()
+
+// ──────────────────────────────────────────────
+// Tab state
+// ──────────────────────────────────────────────
+const activeTab = ref<'route' | 'congestion' | 'facilities' | 'photospots'>('route')
+
+// ──────────────────────────────────────────────
+// Facility type map
+// ──────────────────────────────────────────────
+const facilityTypeMap: Record<number, { label: string; icon: string }> = {
+  0: { label: '卫生间', icon: '🚻' },
+  1: { label: '餐饮', icon: '🍴' },
+  2: { label: '超市', icon: '🛒' },
+  3: { label: '停车场', icon: '🅿️' },
+  4: { label: '售票处', icon: '🎫' },
+  5: { label: '游客中心', icon: 'ℹ️' },
+  6: { label: '医疗点', icon: '🏥' },
+  7: { label: 'ATM', icon: '🏧' },
+  8: { label: '自动贩卖机', icon: '🥤' },
+  9: { label: '摆渡车站', icon: '🚍' },
+  10: { label: '自行车租赁', icon: '🚲' },
+}
+
+const facilityTypeOptions = Object.entries(facilityTypeMap).map(([value, info]) => ({
+  value: Number(value),
+  label: `${info.icon} ${info.label}`,
+}))
+
+// ──────────────────────────────────────────────
+// Congestion helpers
+// ──────────────────────────────────────────────
+const congestionLevelMap: Record<number, { label: string; markerColor: string; tagType: 'success' | 'warning' | 'danger' }> = {
+  0: { label: '舒适', markerColor: '#27AE60', tagType: 'success' },
+  1: { label: '适中', markerColor: '#F39C12', tagType: 'warning' },
+  2: { label: '拥挤', markerColor: '#E74C3C', tagType: 'danger' },
+  3: { label: '严重拥挤', markerColor: '#E74C3C', tagType: 'danger' },
+}
+
+const congestionLoading = ref(false)
+
+/** JOIN congestion.nodes with road network nodes */
+const congestedNodes = computed(() => {
+  if (!nav.congestionData.value || !nodes.value.length) return []
+  return nav.congestionData.value.nodes
+    .map((cn) => {
+      const node = nodes.value.find((n) => n.nodeId === cn.nodeId)
+      if (!node) return null
+      return { ...cn, name: node.name, latitude: node.latitude, longitude: node.longitude }
+    })
+    .filter(Boolean) as (NodeCongestion & { name: string; latitude: number; longitude: number })[]
+})
+
+const overallCongestionLabel = computed(() => {
+  if (!nav.congestionData.value) return ''
+  return congestionLevelMap[nav.congestionData.value.overallLevel]?.label || `等级 ${nav.congestionData.value.overallLevel}`
+})
+
+const overallCongestionTagType = computed(() => {
+  if (!nav.congestionData.value) return 'info'
+  const lvl = nav.congestionData.value.overallLevel
+  if (lvl >= 2) return 'danger'
+  if (lvl === 1) return 'warning'
+  return 'success'
+})
+
+// ──────────────────────────────────────────────
+// Nearby facilities state
+// ──────────────────────────────────────────────
+const selectedFacilityNodeId = ref<number | null>(null)
+const facilityTypeFilter = ref<number | undefined>(undefined)
+const nearbyFacilities = ref<NearbyFacility[]>([])
+const facilitiesLoading = ref(false)
+
+// ──────────────────────────────────────────────
+// Photo spots state
+// ──────────────────────────────────────────────
+const photoSpots = ref<PhotoSpot[]>([])
+const photoSpotsLoading = ref(false)
 
 // ──────────────────────────────────────────────
 // Map
@@ -208,8 +286,179 @@ function resetAll() {
   nodes.value = []
   scenicIdInput.value = null
   mapRef.value?.clearOverlays()
+  // Reset advanced features
+  nearbyFacilities.value = []
+  photoSpots.value = []
+  selectedFacilityNodeId.value = null
+  facilityTypeFilter.value = undefined
+  activeTab.value = 'route'
   ElMessage.success('已重置全部')
 }
+
+// ──────────────────────────────────────────────
+// Congestion: load & mark
+// ──────────────────────────────────────────────
+async function loadAndShowCongestion() {
+  if (!nav.scenicAreaId.value) {
+    ElMessage.warning('请先在路线规划中加载景区路网')
+    return
+  }
+  if (!nodes.value.length) {
+    ElMessage.warning('请先在路线规划中加载路网节点')
+    return
+  }
+  congestionLoading.value = true
+  try {
+    await nav.loadCongestion()
+    if (mapRef.value) {
+      markCongestionOnMap()
+      mapRef.value.setFitView()
+    }
+    ElMessage.success(`拥挤度已更新（${congestedNodes.value.length} 个节点）`)
+  } catch (err: any) {
+    ElMessage.error('加载拥挤度失败：' + (err?.message || '未知错误'))
+  } finally {
+    congestionLoading.value = false
+  }
+}
+
+function markCongestionOnMap() {
+  if (!mapRef.value) return
+  mapRef.value.clearOverlays()
+
+  for (const cn of congestedNodes.value) {
+    const [lng, lat] = wgs84ToGcj02(cn.longitude, cn.latitude)
+    const info = congestionLevelMap[cn.level] || { markerColor: '#909399', label: '未知' }
+    const isHeavy = cn.level >= 2
+
+    mapRef.value.addMarker(lng, lat, {
+      content: `<div style="background:${info.markerColor};color:white;padding:2px 6px;border-radius:4px;font-size:${isHeavy ? '13px' : '11px'};white-space:nowrap;font-weight:${isHeavy ? '600' : '400'}">${cn.name}</div>`,
+    })
+  }
+}
+
+// ──────────────────────────────────────────────
+// Nearby facilities: load & mark
+// ──────────────────────────────────────────────
+async function loadAndShowFacilities() {
+  if (!selectedFacilityNodeId.value) {
+    ElMessage.warning('请先选择节点')
+    return
+  }
+  facilitiesLoading.value = true
+  try {
+    nearbyFacilities.value = await nav.loadNearbyFacilities(
+      selectedFacilityNodeId.value,
+      facilityTypeFilter.value,
+    )
+    if (mapRef.value) {
+      markFacilitiesOnMap()
+    }
+    ElMessage.success(`找到 ${nearbyFacilities.value.length} 个附近设施`)
+  } catch (err: any) {
+    ElMessage.error('查询设施失败：' + (err?.message || '未知错误'))
+  } finally {
+    facilitiesLoading.value = false
+  }
+}
+
+function markFacilitiesOnMap() {
+  if (!mapRef.value) return
+  mapRef.value.clearOverlays()
+  for (const fac of nearbyFacilities.value) {
+    const [lng, lat] = wgs84ToGcj02(fac.longitude, fac.latitude)
+    const typeInfo = facilityTypeMap[fac.type] || { label: '设施', icon: '📍' }
+    mapRef.value.addTextMarker(lng, lat, `${typeInfo.icon} ${fac.name}`, '#409EFF')
+  }
+  mapRef.value.setFitView()
+}
+
+// ──────────────────────────────────────────────
+// Photo spots: load & mark
+// ──────────────────────────────────────────────
+async function loadAndShowPhotoSpots() {
+  if (!nav.scenicAreaId.value) {
+    ElMessage.warning('请先在路线规划中加载景区路网')
+    return
+  }
+  photoSpotsLoading.value = true
+  try {
+    photoSpots.value = await nav.loadPhotoSpots()
+    if (mapRef.value) {
+      markPhotoSpotsOnMap()
+    }
+    ElMessage.success(`加载了 ${photoSpots.value.length} 个拍照点`)
+  } catch (err: any) {
+    ElMessage.error('加载拍照点失败：' + (err?.message || '未知错误'))
+  } finally {
+    photoSpotsLoading.value = false
+  }
+}
+
+function markPhotoSpotsOnMap() {
+  if (!mapRef.value) return
+  mapRef.value.clearOverlays()
+  for (const spot of photoSpots.value) {
+    const [lng, lat] = wgs84ToGcj02(spot.latitude, spot.longitude)
+    mapRef.value.addTextMarker(lng, lat, `📷 ${spot.name}`, '#E040FB')
+  }
+  mapRef.value.setFitView()
+}
+
+// ──────────────────────────────────────────────
+// Fullscreen toggle
+// ──────────────────────────────────────────────
+const mapContainerRef = ref<HTMLElement | null>(null)
+
+function toggleFullscreen() {
+  const el = mapContainerRef.value
+  if (!el) return
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  } else {
+    el.requestFullscreen()
+  }
+}
+
+// ──────────────────────────────────────────────
+// Tab-switch watch: redraw markers for current tab
+// ──────────────────────────────────────────────
+watch(activeTab, (tab) => {
+  if (!mapRef.value) return
+
+  switch (tab) {
+    case 'route':
+      if (nodes.value.length > 0) {
+        mapRef.value.clearOverlays()
+        markNodesOnMap()
+        if (nav.currentRoute.value) drawSingleRoute()
+        if (nav.multiRoute.value) drawMultiRoute()
+        mapRef.value.setFitView()
+      }
+      break
+    case 'congestion':
+      if (congestedNodes.value.length > 0) {
+        mapRef.value.clearOverlays()
+        markCongestionOnMap()
+        mapRef.value.setFitView()
+      }
+      break
+    case 'facilities':
+      if (nearbyFacilities.value.length > 0) {
+        mapRef.value.clearOverlays()
+        markFacilitiesOnMap()
+        mapRef.value.setFitView()
+      }
+      break
+    case 'photospots':
+      if (photoSpots.value.length > 0) {
+        mapRef.value.clearOverlays()
+        markPhotoSpotsOnMap()
+        mapRef.value.setFitView()
+      }
+      break
+  }
+})
 
 // ──────────────────────────────────────────────
 // Display helpers
@@ -249,6 +498,16 @@ const routeSegmentsCount = computed(() => nav.multiRoute.value?.segments?.length
         <h2 class="panel-title">路线导航</h2>
         <p class="panel-desc">加载景区路网，规划游览路径</p>
       </div>
+
+      <el-tabs v-model="activeTab" class="nav-tabs">
+        <el-tab-pane label="路线" name="route" />
+        <el-tab-pane label="拥挤度" name="congestion" />
+        <el-tab-pane label="设施" name="facilities" />
+        <el-tab-pane label="拍照点" name="photospots" />
+      </el-tabs>
+
+      <!------ Route tab content ------>
+      <div v-show="activeTab === 'route'" class="tab-content">
 
       <!------ Scenic ID + Load ------>
       <div class="panel-section">
@@ -439,16 +698,169 @@ const routeSegmentsCount = computed(() => nav.multiRoute.value?.segments?.length
           重置全部
         </el-button>
       </div>
+
+      </div><!-- /route tab content -->
+
+      <!------ Congestion tab content ------>
+      <div v-show="activeTab === 'congestion'" class="tab-content">
+        <div class="panel-section">
+          <p class="panel-desc">查看景区各节点实时拥挤情况</p>
+        </div>
+        <div class="panel-section">
+          <el-button
+            type="primary"
+            :loading="congestionLoading"
+            :disabled="!nav.scenicAreaId.value"
+            class="full-width"
+            @click="loadAndShowCongestion"
+          >
+            加载拥挤度
+          </el-button>
+        </div>
+        <div class="panel-section" v-if="nav.congestionData.value">
+          <div class="congestion-overall">
+            <span class="section-label">整体拥挤度</span>
+            <el-tag :type="overallCongestionTagType" effect="dark" size="large">
+              {{ overallCongestionLabel }}
+            </el-tag>
+            <span class="update-time">{{ nav.congestionData.value.updateTime }}</span>
+          </div>
+          <div class="congestion-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#27AE60"></span>舒适</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#F39C12"></span>适中</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#E74C3C"></span>拥挤</span>
+          </div>
+        </div>
+        <div class="panel-section" v-if="congestedNodes.length">
+          <label class="section-label">拥挤节点 ({{ congestedNodes.length }})</label>
+          <el-scrollbar max-height="180px">
+            <div v-for="cn in congestedNodes" :key="cn.nodeId" class="facility-item">
+              <span class="facility-name">
+                <span class="legend-dot" :style="{ background: congestionLevelMap[cn.level]?.markerColor || '#909399' }"></span>
+                {{ cn.name }}
+              </span>
+              <el-tag :type="congestionLevelMap[cn.level]?.tagType || 'info'" size="small">
+                {{ congestionLevelMap[cn.level]?.label || '未知' }}
+              </el-tag>
+            </div>
+          </el-scrollbar>
+        </div>
+      </div>
+
+      <!------ Facilities tab content ------>
+      <div v-show="activeTab === 'facilities'" class="tab-content">
+        <div class="panel-section">
+          <p class="panel-desc">查询选中节点附近的设施</p>
+        </div>
+        <div class="panel-section">
+          <label class="section-label">选择节点</label>
+          <el-select
+            v-model="selectedFacilityNodeId"
+            placeholder="选择路网节点"
+            class="full-width"
+            filterable
+            :disabled="!nodes.length"
+          >
+            <el-option
+              v-for="node in nodes"
+              :key="node.nodeId"
+              :label="node.name + ' (#' + node.nodeId + ')'"
+              :value="node.nodeId"
+            />
+          </el-select>
+        </div>
+        <div class="panel-section">
+          <label class="section-label">设施类型</label>
+          <el-select
+            v-model="facilityTypeFilter"
+            placeholder="全部类型"
+            class="full-width"
+            clearable
+          >
+            <el-option
+              v-for="opt in facilityTypeOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </div>
+        <div class="panel-section">
+          <el-button
+            type="primary"
+            :loading="facilitiesLoading"
+            :disabled="!selectedFacilityNodeId"
+            class="full-width"
+            @click="loadAndShowFacilities"
+          >
+            查询附近设施
+          </el-button>
+        </div>
+        <div class="panel-section" v-if="nearbyFacilities.length">
+          <label class="section-label">设施列表 ({{ nearbyFacilities.length }})</label>
+          <el-scrollbar max-height="200px">
+            <div v-for="f in nearbyFacilities" :key="f.id" class="facility-item">
+              <span class="facility-name">
+                {{ facilityTypeMap[f.type]?.icon || '📍' }} {{ f.name }}
+              </span>
+              <span class="facility-dist">{{ f.distance }}m</span>
+            </div>
+          </el-scrollbar>
+        </div>
+        <div class="panel-section empty-state" v-else-if="!facilitiesLoading && selectedFacilityNodeId">
+          <p class="empty-hint">附近暂无设施</p>
+        </div>
+      </div>
+
+      <!------ Photo spots tab content ------>
+      <div v-show="activeTab === 'photospots'" class="tab-content">
+        <div class="panel-section">
+          <p class="panel-desc">推荐拍照打卡点</p>
+        </div>
+        <div class="panel-section">
+          <el-button
+            type="primary"
+            :loading="photoSpotsLoading"
+            :disabled="!nav.scenicAreaId.value"
+            class="full-width"
+            @click="loadAndShowPhotoSpots"
+          >
+            加载拍照点
+          </el-button>
+        </div>
+        <div class="panel-section" v-if="photoSpots.length">
+          <label class="section-label">拍照点 ({{ photoSpots.length }})</label>
+          <el-scrollbar max-height="260px">
+            <div v-for="s in photoSpots" :key="s.id" class="spot-item">
+              <div class="spot-name">📷 {{ s.name }}</div>
+              <div class="spot-target">主题: {{ s.targetName }}</div>
+              <div class="spot-meta">
+                <span class="spot-rating">⭐ {{ s.rating }}</span>
+                <span class="spot-checkin">{{ s.checkInCount }} 人打卡</span>
+              </div>
+            </div>
+          </el-scrollbar>
+        </div>
+      </div>
+
     </aside>
 
     <!-- ════ MAP AREA ════ -->
-    <main class="nav-map">
+    <main class="nav-map" ref="mapContainerRef">
       <AmapContainer
         ref="mapRef"
         :center="mapCenter"
         :zoom="16"
         @ready="onMapReady"
       />
+      <div class="map-tools">
+        <el-button class="fullscreen-btn" :icon="FullScreen" circle size="small" @click="toggleFullscreen" />
+        <div v-if="activeTab === 'congestion' && nav.congestionData.value" class="map-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#27AE60"></span>舒适</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#F39C12"></span>适中</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#E74C3C"></span>拥挤</span>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -719,6 +1131,174 @@ const routeSegmentsCount = computed(() => nav.multiRoute.value?.segments?.length
 
 .panel-actions-bottom .el-button {
   flex: 1;
+}
+
+/* ═══════════════════════════════════════════════
+   NAV TABS
+   ═══════════════════════════════════════════════ */
+.nav-tabs {
+  flex-shrink: 0;
+}
+
+.nav-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+  padding: 0 12px;
+}
+
+.nav-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+}
+
+/* ── Tab content ── */
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   CONGESTION TAB
+   ═══════════════════════════════════════════════ */
+.congestion-overall {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.update-time {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  margin-left: auto;
+}
+
+.congestion-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-regular, #606266);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   FACILITIES TAB
+   ═══════════════════════════════════════════════ */
+.facility-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+  font-size: 13px;
+}
+
+.facility-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.facility-dist {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary, #ff6b35);
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* ═══════════════════════════════════════════════
+   PHOTO SPOTS TAB
+   ═══════════════════════════════════════════════ */
+.spot-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+}
+
+.spot-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary, #2c3e50);
+  margin-bottom: 4px;
+}
+
+.spot-target {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #7f8c8d);
+  margin-bottom: 4px;
+}
+
+.spot-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.spot-rating {
+  color: #f39c12;
+  font-weight: 600;
+}
+
+.spot-checkin {
+  color: var(--el-text-color-placeholder, #c0c4cc);
+}
+
+/* ═══════════════════════════════════════════════
+   MAP TOOLS OVERLAY
+   ═══════════════════════════════════════════════ */
+.map-tools {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.fullscreen-btn {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.map-legend {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 8px 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-regular, #606266);
+}
+
+/* ═══════════════════════════════════════════════
+   EMPTY STATE
+   ═══════════════════════════════════════════════ */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
 }
 
 /* ═══════════════════════════════════════════════
