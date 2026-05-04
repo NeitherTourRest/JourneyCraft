@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Menu } from '@element-plus/icons-vue'
+import { Menu, ArrowDown } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { ElMessage } from 'element-plus'
 
 defineEmits<{
   'toggle-sidebar': []
@@ -22,6 +23,18 @@ const username = computed(() => {
 const avatarUrl = computed(() => {
   return auth.user?.avatarUrl || undefined
 })
+
+async function handleLogout() {
+  try {
+    await auth.logout()
+  } catch {
+    // If server is down, still clear local state
+    auth.clearAuth()
+    localStorage.removeItem('journeycraft-auth')
+    window.location.hash = '/login'
+  }
+  ElMessage.success('已退出登录')
+}
 </script>
 
 <template>
@@ -36,10 +49,29 @@ const avatarUrl = computed(() => {
       <span class="page-title">{{ pageTitle }}</span>
     </div>
     <div class="header-right">
-      <el-avatar :size="32" :src="avatarUrl" class="user-avatar">
-        {{ username.charAt(0) }}
-      </el-avatar>
-      <span class="username">{{ username }}</span>
+      <el-dropdown trigger="click" v-if="auth.isAuthenticated">
+        <div class="user-info">
+          <el-avatar :size="32" :src="avatarUrl" class="user-avatar">
+            {{ username.charAt(0) }}
+          </el-avatar>
+          <span class="username">{{ username }}</span>
+          <el-icon class="dropdown-icon"><ArrowDown /></el-icon>
+        </div>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item>
+              <span>👤 个人中心</span>
+            </el-dropdown-item>
+            <el-dropdown-item divided @click="handleLogout">
+              <span style="color: var(--el-color-danger)">退出登录</span>
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <div class="user-info" v-else>
+        <el-avatar :size="32" class="user-avatar">?</el-avatar>
+        <span class="username">未登录</span>
+      </div>
     </div>
   </header>
 </template>
@@ -88,6 +120,18 @@ const avatarUrl = computed(() => {
   font-size: 14px;
   color: var(--el-text-color-regular, #606266);
   white-space: nowrap;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.dropdown-icon {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
 }
 
 /* Show hamburger on tablet and mobile */
