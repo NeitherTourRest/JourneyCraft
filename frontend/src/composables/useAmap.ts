@@ -17,11 +17,18 @@ export function useAmap() {
       return null
     }
 
+    // ★ 高德 JS API 2.0 安全密钥：必须在 SDK 加载前设置
+    const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE
+    if (securityCode) {
+      ;(window as any)._AMapSecurityConfig = {
+        securityJsCode: securityCode,
+      }
+    }
+
     amapPromise = AMapLoader.load({
       key,
       version: '2.0',
-      securityJsCode: import.meta.env.VITE_AMAP_SECURITY_CODE,
-    } as any)
+    })
 
     return amapPromise
   }
