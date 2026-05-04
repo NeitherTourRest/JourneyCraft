@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from 'vue-router'
 
-const PlaceholderLogin = () => import('@/views/PlaceholderLogin.vue')
+const LoginView = () => import('@/views/LoginView.vue')
+const RegisterView = () => import('@/views/RegisterView.vue')
 const PlaceholderPage = () => import('@/views/PlaceholderPage.vue')
 const NotFound = () => import('@/views/NotFound.vue')
 
@@ -12,13 +13,13 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'Login',
-    component: PlaceholderLogin,
+    component: LoginView,
     meta: { requiresAuth: false, title: '登录' },
   },
   {
     path: '/register',
     name: 'Register',
-    component: PlaceholderPage,
+    component: RegisterView,
     meta: { requiresAuth: false, title: '注册' },
   },
   {

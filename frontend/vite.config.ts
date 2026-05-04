@@ -29,5 +29,12 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    setupFiles: ['./vitest.setup.ts'],
+    css: false,
+    server: {
+      deps: {
+        inline: ['element-plus'],
+      },
+    },
   },
 })
