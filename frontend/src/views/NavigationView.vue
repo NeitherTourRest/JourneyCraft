@@ -135,9 +135,11 @@ const photoSpots = ref<PhotoSpot[]>([])
 const photoSpotsLoading = ref(false)
 
 // ──────────────────────────────────────────────
-// Pick mode (map click to select start/end)
+// Map click → context menu (replaces pick mode)
 // ──────────────────────────────────────────────
-const pickMode = ref<'start' | 'end' | null>(null)
+const clickMenuNode = ref<PathNode | null>(null)
+const clickMenuDistance = ref(0)
+const clickMenuPos = ref<{ x: number; y: number } | null>(null)
 
 // ──────────────────────────────────────────────
 // Map
@@ -193,7 +195,15 @@ async function loadNodes() {
       mapCenter.value = [lng, lat]
     }
 
-    if (mapReady.value) markNodesOnMap()
+    if (mapReady.value) {
+      markNodesOnMap()
+      // Explicitly move the map to first node (AmapContainer :center may not trigger flyTo)
+      if (nodes.value.length > 0) {
+        const [lng, lat] = wgs84ToGcj02(nodes.value[0].longitude, nodes.value[0].latitude)
+        const map = mapRef.value?.getMap()
+        if (map) { map.setCenter([lng, lat]); map.setZoom(16) }
+      }
+    }
     nodesLoadedCount.value = nodes.value.length
     nodesLoadedSuccess.value = true
     lastScenicHint.value = ''
@@ -267,47 +277,54 @@ function setEndFromPopup() {
 }
 
 // ──────────────────────────────────────────────
-// Map click → pick start/end node
+// Map click → context menu (replaces pick mode)
 // ──────────────────────────────────────────────
-function setPickMode(mode: 'start' | 'end' | null) {
-  pickMode.value = mode
-  if (mode) ElMessage.info(`地图点击模式：${mode === 'start' ? '选择起点' : '选择终点'} — 点击地图上的位置`)
-  else ElMessage.info('已关闭地图选点模式')
-}
-
 function onMapClick(lnglat: [number, number]) {
-  if (!pickMode.value || nodes.value.length === 0) return
+  closeMenu()
+  if (nodes.value.length === 0) return
 
-  // Convert GCJ-02 (AMap coordinate) to WGS-84
+  // Convert GCJ-02 (AMap coordinate) to WGS-84 for node lookup
   const [wgsLng, wgsLat] = gcj02ToWgs84(lnglat[0], lnglat[1])
-
-  // Find nearest node among loaded nodes
   const result = findNearestNode(wgsLng, wgsLat, nodes.value, 200)
 
-  if (!result) {
-    ElMessage.warning('附近未找到路网节点（距离 > 200 米）')
-    return
-  }
+  if (result) {
+    clickMenuNode.value = result.node
+    clickMenuDistance.value = result.distance
+    clickMenuPos.value = mapRef.value?.lngLatToPixel(lnglat[0], lnglat[1]) ?? null
 
-  // Visual feedback: show where user clicked
-  if (mapRef.value) {
-    mapRef.value.addMarker(lnglat[0], lnglat[1], {
-      content: '<div style="width:16px;height:16px;border:3px solid #FF6B35;border-radius:50%;background:rgba(255,107,53,0.2);animation:pulse 1s infinite"></div>',
-    })
-  }
-
-  // Set node as start or end based on mode
-  if (pickMode.value === 'start') {
-    nav.setStartNode(result.node.nodeId)
-    markNodesOnMap()
+    // Auto-center map on the found node
+    const [gcjLng, gcjLat] = wgs84ToGcj02(result.node.longitude, result.node.latitude)
+    const map = mapRef.value?.getMap()
+    if (map) map.setCenter([gcjLng, gcjLat])
   } else {
-    addAsEnd(result.node)
+    // No node nearby — visual feedback only
+    mapRef.value?.addMarker(lnglat[0], lnglat[1], {
+      content: '<div style="width:12px;height:12px;background:var(--el-color-primary);border-radius:50%;opacity:0.6"></div>',
+    })
+    ElMessage.info('该位置附近未找到路网节点')
   }
+}
 
-  ElMessage.success(`已${pickMode.value === 'start' ? '设置起点' : '添加终点'}: ${result.node.name} (距离 ${result.distance}m)`)
-
-  // Exit pick mode after selection
-  pickMode.value = null
+function menuSetStart() {
+  if (clickMenuNode.value) { setAsStart(clickMenuNode.value); closeMenu() }
+}
+function menuSetEnd() {
+  if (clickMenuNode.value) { addAsEnd(clickMenuNode.value); closeMenu() }
+}
+function menuAddWaypoint() {
+  if (clickMenuNode.value) { addAsEnd(clickMenuNode.value); closeMenu() }
+}
+function menuFocusNode() {
+  if (clickMenuNode.value) {
+    const [lng, lat] = wgs84ToGcj02(clickMenuNode.value.longitude, clickMenuNode.value.latitude)
+    const map = mapRef.value?.getMap()
+    if (map) { map.setCenter([lng, lat]); map.setZoom(17) }
+  }
+  closeMenu()
+}
+function closeMenu() {
+  clickMenuNode.value = null
+  clickMenuPos.value = null
 }
 
 // ──────────────────────────────────────────────
@@ -358,7 +375,7 @@ function onNodeSearchInput(val: string) {
     nodeSearchLoading.value = true
     try {
       const res = await request.get<any>('/api/navigation/nodes/search', {
-        params: { scenicAreaId: nav.scenicAreaId.value, keyword: val, size: 20 },
+        params: { scenicAreaId: nav.scenicAreaId.value, keyword: val, pageSize: 20, pageNum: 1 },
       })
       const apiData = res.data as any
       // Check for 404 or not-implemented
@@ -1020,29 +1037,6 @@ onUnmounted(() => {
             <p class="empty-hint">尚未加载路网节点</p>
           </div>
 
-          <!------ Map click pick mode ------>
-          <div class="panel-section">
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <el-button
-                size="small"
-                :type="pickMode === 'start' ? 'success' : 'default'"
-                @click="setPickMode(pickMode === 'start' ? null : 'start')"
-                :disabled="!nodes.length"
-              >
-                📍 选起点
-              </el-button>
-              <el-button
-                size="small"
-                :type="pickMode === 'end' ? 'warning' : 'default'"
-                @click="setPickMode(pickMode === 'end' ? null : 'end')"
-                :disabled="!nodes.length"
-              >
-                📍 选终点
-              </el-button>
-            </div>
-            <p v-if="pickMode" style="font-size:12px;color:var(--el-color-primary);margin:4px 0 0">点击地图选择{{ pickMode === 'start' ? '起点' : '终点' }}</p>
-          </div>
-
           <!------ Plan button ------>
           <div class="panel-section panel-actions">
             <el-button
@@ -1253,6 +1247,31 @@ onUnmounted(() => {
         @ready="onMapReady"
         @click="onMapClick"
       />
+
+      <!-- ── Map click context menu ── -->
+      <Transition name="popup">
+        <div v-if="clickMenuNode && clickMenuPos" class="click-menu" :style="{ left: clickMenuPos.x + 'px', top: clickMenuPos.y + 'px' }">
+          <div class="click-menu-header">
+            <strong>{{ clickMenuNode.name }}</strong>
+            <span class="click-menu-dist">{{ clickMenuDistance }}m</span>
+          </div>
+          <div class="click-menu-actions">
+            <button class="menu-btn menu-btn-start" @click="menuSetStart">
+              <span>🟢</span> 设为起点
+            </button>
+            <button class="menu-btn menu-btn-end" @click="menuSetEnd">
+              <span>🟠</span> 设为终点
+            </button>
+            <button class="menu-btn menu-btn-waypoint" @click="menuAddWaypoint">
+              <span>⚪</span> 加入路径
+            </button>
+            <button class="menu-btn menu-btn-focus" @click="menuFocusNode">
+              <span>📍</span> 地图聚焦
+            </button>
+          </div>
+          <button class="menu-close" @click="closeMenu">✕</button>
+        </div>
+      </Transition>
 
       <!-- Panel toggle button (mobile) -->
       <button
@@ -2371,6 +2390,117 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   padding: 24px 16px;
+}
+
+/* ═══════════════════════════════════════════════
+   CLICK MENU (map click context menu)
+   ═══════════════════════════════════════════════ */
+.click-menu {
+  position: absolute;
+  z-index: 999;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  min-width: 160px;
+  transform: translate(-50%, -100%);
+  margin-top: -12px;
+  pointer-events: auto;
+}
+
+.click-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+  margin-bottom: 4px;
+}
+
+.click-menu-header strong {
+  font-size: 13px;
+}
+
+.click-menu-dist {
+  font-size: 11px;
+  color: var(--el-text-color-secondary, #909399);
+}
+
+.click-menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.menu-btn:hover {
+  background: var(--el-fill-color-light, #f5f7fa);
+}
+
+.menu-btn-start {
+  color: var(--el-color-success, #67C23A);
+}
+
+.menu-btn-end {
+  color: var(--el-color-primary, #FF6B35);
+}
+
+.menu-btn-waypoint {
+  color: var(--el-text-color-primary, #303133);
+}
+
+.menu-btn-focus {
+  color: var(--el-color-info, #3498DB);
+}
+
+.menu-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--el-text-color-secondary, #909399);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.menu-close:hover {
+  background: var(--el-fill-color-lighter, #f0f2f5);
+}
+
+/* Popup transition (shared by marker popup & click menu) */
+.popup-enter-active {
+  transition: all 0.2s ease-out;
+}
+
+.popup-leave-active {
+  transition: all 0.15s ease-in;
+}
+
+.popup-enter-from {
+  opacity: 0;
+  transform: translate(-50%, -90%) scale(0.9);
+}
+
+.popup-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -90%) scale(0.9);
 }
 
 /* ═══════════════════════════════════════════════
