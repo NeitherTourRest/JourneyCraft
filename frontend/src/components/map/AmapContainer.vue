@@ -111,10 +111,15 @@ function addTextMarker(
   lat: number,
   text: string,
   color?: string,
+  onClick?: (pos: { lng: number; lat: number }) => void,
 ) {
-  return addMarker(lng, lat, {
-    content: `<div style="background:${color || '#3366FF'};color:white;padding:2px 6px;border-radius:4px;font-size:12px;white-space:nowrap">${text}</div>`,
+  const marker = addMarker(lng, lat, {
+    content: `<div style="background:${color || '#3366FF'};color:white;padding:2px 6px;border-radius:4px;font-size:12px;white-space:nowrap;cursor:pointer">${text}</div>`,
   })
+  if (onClick && marker) {
+    marker.on('click', () => onClick({ lng, lat }))
+  }
+  return marker
 }
 
 function drawPolyline(
@@ -160,6 +165,17 @@ function getMap() {
   return map
 }
 
+function getAMap() {
+  return amapModule
+}
+
+function lngLatToPixel(lng: number, lat: number): { x: number; y: number } | null {
+  if (!map || !amapModule) return null
+  const px = map.lngLatToContainer(new amapModule.LngLat(lng, lat))
+  if (!px) return null
+  return { x: Math.round(px.x), y: Math.round(px.y) }
+}
+
 defineExpose({
   addMarker,
   addTextMarker,
@@ -167,6 +183,8 @@ defineExpose({
   clearOverlays,
   setFitView,
   getMap,
+  getAMap,
+  lngLatToPixel,
 })
 </script>
 
