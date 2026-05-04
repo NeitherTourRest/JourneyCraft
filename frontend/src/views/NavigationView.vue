@@ -161,6 +161,12 @@ const nodesLoading = ref(false)
 const nodesLoadedSuccess = ref(false)
 const nodesLoadedCount = ref(0)
 
+// ── Node name search (API-backed) ──
+const nodeSearchKeyword = ref('')
+const nodeSearchResults = ref<any[]>([])
+const nodeSearchLoading = ref(false)
+let nodeSearchTimer: ReturnType<typeof setTimeout> | null = null
+
 async function loadNodes() {
   if (!scenicIdInput.value) {
     ElMessage.warning('请输入景区 ID')
@@ -339,6 +345,65 @@ const filteredNodes = computed(() => {
   const kw = nodeSearch.value.toLowerCase()
   return nodes.value.filter((n) => n.name.toLowerCase().includes(kw))
 })
+
+// ──────────────────────────────────────────────
+// API node search (debounced)
+// ──────────────────────────────────────────────
+function onNodeSearchInput(val: string) {
+  if (nodeSearchTimer) clearTimeout(nodeSearchTimer)
+  if (!val || val.length < 1) { nodeSearchResults.value = []; return }
+
+  nodeSearchTimer = setTimeout(async () => {
+    if (!nav.scenicAreaId.value) return
+    nodeSearchLoading.value = true
+    try {
+      const res = await request.get<any>('/api/navigation/nodes/search', {
+        params: { scenicAreaId: nav.scenicAreaId.value, keyword: val, size: 20 },
+      })
+      const apiData = res.data as any
+      // Check for 404 or not-implemented
+      if (apiData.code === 404 || apiData.status === 404) {
+        ElMessage.warning('节点搜索功能暂不可用')
+        nodeSearchResults.value = []
+        return
+      }
+      if (apiData.code !== 200) { nodeSearchResults.value = []; return }
+      nodeSearchResults.value = apiData.data?.list || apiData.data?.records || []
+    } catch (err: any) {
+      // Graceful degradation: if API not implemented (404)
+      if (err?.response?.status === 404 || err?.status === 404) {
+        ElMessage.warning('节点搜索功能暂不可用')
+      }
+      nodeSearchResults.value = []
+    } finally {
+      nodeSearchLoading.value = false
+    }
+  }, 300)
+}
+
+function getNodeTypeLabel(type: number | null | undefined): string {
+  const labels: Record<number, string> = { 0: '入口', 1: '路口', 2: 'POI', 3: '设施入口', 4: '拍照点', 5: '普通节点' }
+  return labels[type ?? 5] || '未知'
+}
+
+function focusNodeOnMap(node: any) {
+  const pathNode = nodes.value.find((n) => n.nodeId === (node.id ?? node.nodeId))
+  if (!pathNode || !mapRef.value) return
+
+  const [lng, lat] = wgs84ToGcj02(pathNode.longitude, pathNode.latitude)
+  mapRef.value.clearOverlays()
+  markNodesOnMap()
+  mapRef.value.addMarker(lng, lat, {
+    content: `<div style="background:#FF6B35;color:white;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:600">${pathNode.name}</div>`,
+  })
+  // Focus map on this node
+  const map = mapRef.value.getMap()
+  if (map) map.setCenter([lng, lat])
+  if (map) map.setZoom(17)
+
+  // Trigger the marker popup for this node
+  handleMarkerClick(pathNode, lng, lat)
+}
 
 // ──────────────────────────────────────────────
 // Node selection helpers
@@ -805,6 +870,34 @@ onUnmounted(() => {
             />
             <div v-if="nodesLoadedSuccess && !nodesLoading" class="load-success-inline">
               <span class="success-check">✓</span> 已加载 {{ nodesLoadedCount }} 个路网节点
+            </div>
+          </div>
+
+          <!------ Node name search (API-backed) ------>
+          <div class="panel-section" v-if="nodes.length">
+            <el-input
+              v-model="nodeSearchKeyword"
+              placeholder="搜索景区内的路网节点..."
+              :prefix-icon="Search"
+              clearable
+              @input="onNodeSearchInput"
+              @clear="nodeSearchResults = []"
+            />
+
+            <!-- Search results -->
+            <div v-if="nodeSearchResults.length > 0" class="search-results">
+              <div
+                v-for="r in nodeSearchResults"
+                :key="r.id || r.nodeId"
+                class="search-result-item"
+                @click="focusNodeOnMap(r)"
+              >
+                <span class="result-name">{{ r.name }}</span>
+                <span class="result-type">{{ getNodeTypeLabel(r.nodeType) }}</span>
+              </div>
+            </div>
+            <div v-else-if="nodeSearchKeyword && !nodeSearchLoading" class="search-empty">
+              未找到匹配节点
             </div>
           </div>
 
@@ -1590,6 +1683,56 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--el-text-color-placeholder, #c0c4cc);
   margin: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   NODE SEARCH RESULTS (API-backed)
+   ═══════════════════════════════════════════════ */
+.search-results {
+  margin-top: 8px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.search-result-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+}
+
+.search-result-item:hover {
+  background: var(--el-fill-color-light, #f5f7fa);
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.result-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-primary, #303133);
+}
+
+.result-type {
+  font-size: 11px;
+  color: var(--el-text-color-secondary, #909399);
+  background: var(--el-fill-color-lighter, #f0f2f5);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.search-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  padding: 16px;
+  text-align: center;
 }
 
 /* ═══════════════════════════════════════════════
