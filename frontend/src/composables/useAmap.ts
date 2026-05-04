@@ -4,10 +4,17 @@ let amapPromise: Promise<any> | null = null
 let loadError: Error | null = null
 
 export function useAmap() {
+  /**
+   * 清除加载失败状态，允许重新加载（配置变更后使用）
+   */
+  function resetLoadError() {
+    loadError = null
+    amapPromise = null
+  }
+
   function loadAmap(): Promise<any> | null {
-    // If previously failed, return null immediately (don't retry)
     if (loadError) {
-      console.error('[useAmap] 地图加载已失败:', loadError.message)
+      console.warn('[useAmap] 上次加载已失败，可通过 resetLoadError() 清除后重试')
       return null
     }
     if (amapPromise) return amapPromise
@@ -21,7 +28,7 @@ export function useAmap() {
     const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE
     console.log('[useAmap] 开始加载高德地图 SDK...', { key: key.slice(0, 6) + '...', hasSecurityCode: !!securityCode })
 
-    // ★ 高德 JS API 2.0 安全密钥：必须在 SDK 加载前设置
+    // 高德 JS API 2.0 安全密钥：必须在 SDK 加载前设置
     if (securityCode) {
       ;(window as any)._AMapSecurityConfig = {
         securityJsCode: securityCode,
@@ -36,18 +43,17 @@ export function useAmap() {
       version: '2.0',
     })
       .then((AMap: any) => {
-        console.log('[useAmap] ✅ 高德地图 SDK 加载成功')
+        console.log('[useAmap] 高德地图 SDK 加载成功')
         return AMap
       })
       .catch((err: Error) => {
-        console.error('[useAmap] ❌ 高德地图 SDK 加载失败:', err.message || err)
+        console.error('[useAmap] 高德地图 SDK 加载失败:', err.message || err)
         loadError = err
-        amapPromise = null // Reset so user can retry after fixing config
         throw err
       })
 
     return amapPromise
   }
 
-  return { loadAmap }
+  return { loadAmap, resetLoadError }
 }

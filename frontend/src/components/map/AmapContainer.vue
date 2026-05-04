@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAmap } from '@/composables/useAmap'
 
 interface Props {
@@ -20,6 +20,7 @@ const emit = defineEmits<{
 const { loadAmap } = useAmap()
 const containerRef = ref<HTMLDivElement>()
 let map: any = null
+let amapModule: any = null  // Store AMap module ref for exposed methods
 const markers: any[] = []
 const polylines: any[] = []
 const loadFailed = ref(false)
@@ -41,13 +42,36 @@ onMounted(async () => {
       return
     }
 
+    // ★ 保存 AMap 模块引用给暴露的方法使用
+    amapModule = AMap
+
+    // ★ 先让容器可见，再创建地图实例（避免 display:none 导致 0x0 尺寸）
+    isLoading.value = false
+    await nextTick()
+
     map = new AMap.Map(containerRef.value, {
       zoom: props.zoom,
       center: props.center,
       viewMode: '2D',
     })
 
-    console.log('[AmapContainer] 地图实例创建成功, 中心:', props.center)
+    console.log('[AmapContainer] 地图实例创建成功, 中心:', props.center, '容器尺寸:', containerRef.value?.clientWidth, 'x', containerRef.value?.clientHeight)
+
+    map.on('complete', () => {
+      console.log('[AmapContainer] 地图瓦片加载完成')
+    })
+
+    void setTimeout(() => {
+      if (!map) return  // 组件已卸载，忽略
+      console.warn('[AmapContainer] 地图瓦片加载超时。可能原因：安全密钥错误 / Key 类型不是 Web端(JS API) / 域名未在白名单中')
+      loadErrorMsg.value = [
+        '地图瓦片加载超时，请检查：',
+        '1. 安全密钥 (AMAP_SECURITY_CODE) 是否正确',
+        '2. Key 是否为 "Web端(JS API)" 类型',
+        '3. 域名 http://localhost:5173 是否已添加白名单',
+      ].join('\n')
+      loadFailed.value = true
+    }, 10000)
 
     map.on('click', (e: any) => {
       emit('click', [e.lnglat.getLng(), e.lnglat.getLat()])
@@ -57,9 +81,8 @@ onMounted(async () => {
   } catch (err: any) {
     console.error('[AmapContainer] 地图加载失败:', err)
     loadFailed.value = true
-    loadErrorMsg.value = err?.message || '地图加载失败'
-  } finally {
     isLoading.value = false
+    loadErrorMsg.value = err?.message || '地图加载失败，请检查控制台详细错误'
   }
 })
 
@@ -83,8 +106,8 @@ function addMarker(
     label?: string
   },
 ): any {
-  if (!map) return null
-  const marker = new (window as any).AMap.Marker({
+  if (!map || !amapModule) return null
+  const marker = new amapModule.Marker({
     position: [lng, lat],
     content: options?.content || '',
     label: options?.label ? { content: options.label } : undefined,
@@ -114,8 +137,8 @@ function drawPolyline(
     showDir?: boolean
   },
 ): any {
-  if (!map) return null
-  const polyline = new (window as any).AMap.Polyline({
+  if (!map || !amapModule) return null
+  const polyline = new amapModule.Polyline({
     path,
     strokeColor: options?.strokeColor || '#3366FF',
     strokeWeight: options?.strokeWeight || 6,
@@ -163,7 +186,7 @@ defineExpose({
   <div class="amap-wrapper" :style="{ minHeight: '400px', height: '100%', width: '100%', position: 'relative' }">
     <!-- Loading state -->
     <div v-if="isLoading" class="amap-status loading">
-      <el-icon class="is-loading"><i class="el-icon-loading" /></el-icon>
+      <div class="spinner"></div>
       <span>地图加载中...</span>
     </div>
     <!-- Error state -->
@@ -222,6 +245,15 @@ defineExpose({
 }
 
 .is-loading {
+  animation: spin 1s linear infinite;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--el-border-color, #dcdfe6);
+  border-top-color: var(--el-color-primary, #FF6B35);
+  border-radius: 50%;
   animation: spin 1s linear infinite;
 }
 
