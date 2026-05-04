@@ -168,7 +168,10 @@ async function loadNodes() {
       throw new Error(apiData.message || `请求失败 (${apiData.code})`)
     }
     const data = apiData.data
-    nodes.value = (Array.isArray(data) ? data : []) as PathNode[]
+    nodes.value = (Array.isArray(data) ? data : []).map((n: any) => ({
+      ...n,
+      nodeId: n.nodeId ?? n.id ?? n.node_id ?? 0,
+    })) as PathNode[]
     nav.scenicAreaId.value = scenicIdInput.value
 
     if (nodes.value.length > 0) {
