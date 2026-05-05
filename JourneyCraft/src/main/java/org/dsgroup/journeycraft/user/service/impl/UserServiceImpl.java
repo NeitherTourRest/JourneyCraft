@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.dsgroup.journeycraft.common.enums.ResponseCodeEnum;
 import org.dsgroup.journeycraft.common.exception.BusinessException;
-import org.dsgroup.journeycraft.common.utils.TokenSessionStore;
 import org.dsgroup.journeycraft.user.api.UserService;
 import org.dsgroup.journeycraft.user.entity.User;
 import org.dsgroup.journeycraft.user.mapper.UserMapper;
@@ -27,25 +26,30 @@ import java.time.LocalDateTime;
 public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
-    private final TokenSessionStore tokenSessionStore;
     private final ObjectMapper objectMapper;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     /**
-     * 查询当前用户信息。
+     * 按用户 ID 查询用户信息。
      */
     @Override
-    public UserInfoRspVO getCurrentUserInfo(String authorization) {
-        User user = requireCurrentUser(authorization);
+    public UserInfoRspVO getUserInfoById(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
+        }
         return toUserInfoRsp(user);
     }
 
     /**
-     * 更新当前用户基础资料。
+     * 按用户 ID 更新用户基础资料。
      */
     @Override
-    public UserInfoRspVO updateCurrentUserInfo(String authorization, UpdateUserInfoReqVO reqVO) {
-        User user = requireCurrentUser(authorization);
+    public UserInfoRspVO updateUserInfoById(Long userId, UpdateUserInfoReqVO reqVO) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
+        }
         if (reqVO.getNickname() != null) {
             user.setNickname(reqVO.getNickname());
         }
@@ -64,11 +68,14 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 修改当前用户密码。
+     * 按用户 ID 修改用户密码。
      */
     @Override
-    public void changePassword(String authorization, ChangePasswordReqVO reqVO) {
-        User user = requireCurrentUser(authorization);
+    public void changePasswordById(Long userId, ChangePasswordReqVO reqVO) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
+        }
         if (!passwordEncoder.matches(reqVO.getOldPassword(), user.getPassword())) {
             throw new BusinessException(ResponseCodeEnum.BAD_REQUEST, "原密码错误");
         }
@@ -78,20 +85,26 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 获取当前用户偏好设置。
+     * 按用户 ID 获取用户偏好设置。
      */
     @Override
-    public UserPreferencesRspVO getCurrentUserPreferences(String authorization) {
-        User user = requireCurrentUser(authorization);
+    public UserPreferencesRspVO getUserPreferencesById(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
+        }
         return parsePreferences(user.getPreferences());
     }
 
     /**
-     * 按字段合并更新用户偏好设置。
+     * 按用户 ID 按字段合并更新用户偏好设置。
      */
     @Override
-    public UserPreferencesRspVO updateCurrentUserPreferences(String authorization, UpdateUserPreferencesReqVO reqVO) {
-        User user = requireCurrentUser(authorization);
+    public UserPreferencesRspVO updateUserPreferencesById(Long userId, UpdateUserPreferencesReqVO reqVO) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
+        }
         UserPreferencesRspVO preferences = parsePreferences(user.getPreferences());
         if (reqVO.getInterests() != null) {
             preferences.setInterests(reqVO.getInterests());
@@ -112,18 +125,6 @@ public class UserServiceImpl implements UserService {
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
         return preferences;
-    }
-
-    /**
-     * 解析 token 并加载当前用户。
-     */
-    private User requireCurrentUser(String authorization) {
-        Long userId = tokenSessionStore.requireUserId(authorization);
-        User user = userMapper.selectById(userId);
-        if (user == null) {
-            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
-        }
-        return user;
     }
 
     /**

@@ -21,6 +21,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     refreshToken.value = null
     user.value = null
+    clearStorage()
   }
 
   // ── localStorage persistence ──

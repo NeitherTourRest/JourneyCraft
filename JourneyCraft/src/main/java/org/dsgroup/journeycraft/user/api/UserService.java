@@ -12,27 +12,27 @@ import org.dsgroup.journeycraft.user.vo.rspvo.UserPreferencesRspVO;
 public interface UserService {
 
     /**
-     * 获取当前登录用户信息。
+     * 按用户 ID 获取用户信息。
      */
-    UserInfoRspVO getCurrentUserInfo(String authorization);
+    UserInfoRspVO getUserInfoById(Long userId);
 
     /**
-     * 更新当前登录用户基础资料。
+     * 按用户 ID 更新用户基础资料。
      */
-    UserInfoRspVO updateCurrentUserInfo(String authorization, UpdateUserInfoReqVO reqVO);
+    UserInfoRspVO updateUserInfoById(Long userId, UpdateUserInfoReqVO reqVO);
 
     /**
-     * 修改当前登录用户密码。
+     * 按用户 ID 修改用户密码。
      */
-    void changePassword(String authorization, ChangePasswordReqVO reqVO);
+    void changePasswordById(Long userId, ChangePasswordReqVO reqVO);
 
     /**
-     * 获取当前登录用户偏好设置。
+     * 按用户 ID 获取用户偏好设置。
      */
-    UserPreferencesRspVO getCurrentUserPreferences(String authorization);
+    UserPreferencesRspVO getUserPreferencesById(Long userId);
 
     /**
-     * 更新当前登录用户偏好设置。
+     * 按用户 ID 更新用户偏好设置。
      */
-    UserPreferencesRspVO updateCurrentUserPreferences(String authorization, UpdateUserPreferencesReqVO reqVO);
+    UserPreferencesRspVO updateUserPreferencesById(Long userId, UpdateUserPreferencesReqVO reqVO);
 }
