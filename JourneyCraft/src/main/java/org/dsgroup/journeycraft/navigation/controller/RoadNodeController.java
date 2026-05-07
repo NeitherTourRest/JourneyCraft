@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.dsgroup.journeycraft.navigation.entity.RoadNode;
 import org.dsgroup.journeycraft.navigation.service.RoadNodeService;
 import org.dsgroup.journeycraft.common.result.Response;
+import org.dsgroup.journeycraft.scenic.entity.ScenicArea;
+import org.dsgroup.journeycraft.scenic.mapper.ScenicAreaMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,6 +33,9 @@ public class RoadNodeController {
 
     @Autowired
     private RoadNodeService roadNodeService;
+
+    @Autowired
+    private ScenicAreaMapper scenicAreaMapper;
 
     @GetMapping("/list")
     @Operation(summary = "获取节点列表（分页）")
@@ -78,17 +83,114 @@ public class RoadNodeController {
         }
     }
 
+    @GetMapping("/scenic/{scenicAreaId}/primary")
+    @Operation(summary = "获取景区代表节点", description = "返回该景区推荐在地图上标记的节点（POI优先）")
+    public Response<RoadNode> getPrimaryNodeByScenicArea(
+            @Parameter(description = "景区ID", required = true) @PathVariable Long scenicAreaId) {
+        try {
+            RoadNode node = roadNodeService.lambdaQuery()
+                    .eq(RoadNode::getScenicAreaId, scenicAreaId)
+                    .eq(RoadNode::getIsPrimary, true)
+                    .one();
+            if (node == null) {
+                return Response.error("该景区没有代表节点");
+            }
+            // Populate scenic area name for frontend display
+            ScenicArea scenic = scenicAreaMapper.selectById(scenicAreaId);
+            if (scenic != null) {
+                node.setScenicAreaName(scenic.getName());
+            }
+            return Response.ok(node);
+        } catch (Exception e) {
+            log.error("查询景区代表节点失败，景区ID: {}", scenicAreaId, e);
+            return Response.error("查询景区代表节点失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/scenic/{scenicAreaId}/entrances")
+    @Operation(summary = "获取景区出入口节点集合", description = "返回景区的主要出入口节点（入口type=0和POI type=2），最多5个")
+    public Response<List<RoadNode>> getEntranceNodes(
+            @Parameter(description = "景区ID", required = true) @PathVariable Long scenicAreaId) {
+        try {
+            List<RoadNode> nodes = roadNodeService.lambdaQuery()
+                    .eq(RoadNode::getScenicAreaId, scenicAreaId)
+                    .eq(RoadNode::getEnabled, true)
+                    .in(RoadNode::getNodeType, 0, 2)  // 入口(0) + POI(2)
+                    .orderByAsc(RoadNode::getIsPrimary)  // is_primary 优先
+                    .last("LIMIT 5")
+                    .list();
+            // Populate scenic area name
+            ScenicArea scenic = scenicAreaMapper.selectById(scenicAreaId);
+            String scenicName = scenic != null ? scenic.getName() : null;
+            if (scenicName != null) {
+                for (RoadNode node : nodes) {
+                    node.setScenicAreaName(scenicName);
+                }
+            }
+            return Response.ok(nodes);
+        } catch (Exception e) {
+            log.error("查询景区出入口失败，景区ID: {}", scenicAreaId, e);
+            return Response.error("查询景区出入口失败: " + e.getMessage());
+        }
+    }
+
     @GetMapping("/scenic/{scenicAreaId}")
     @Operation(summary = "查询景区的节点")
     public Response<List<RoadNode>> getNodesByScenicArea(@PathVariable Long scenicAreaId) {
         try {
+            // Fetch the scenic area name for frontend display
+            ScenicArea scenic = scenicAreaMapper.selectById(scenicAreaId);
+            String scenicName = scenic != null ? scenic.getName() : null;
+
             List<RoadNode> nodes = roadNodeService.lambdaQuery()
                     .eq(RoadNode::getScenicAreaId, scenicAreaId)
                     .list();
+            // Populate scenic area name on each node
+            if (scenicName != null) {
+                for (RoadNode node : nodes) {
+                    node.setScenicAreaName(scenicName);
+                }
+            }
             return Response.ok(nodes);
         } catch (Exception e) {
             log.error("查询景区节点失败，景区ID: {}", scenicAreaId, e);
             return Response.error("查询景区节点失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "搜索景区内节点（按名称或OSM标签）")
+    public Response<IPage<RoadNode>> searchNodes(
+            @RequestParam Long scenicAreaId,
+            @RequestParam String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "20") Integer pageSize) {
+        try {
+            Page<RoadNode> page = new Page<>(pageNum, pageSize);
+            // 对 keyword 中的 SQL LIKE 通配符进行转义，防止 SQL 注入
+            String escapedKeyword = keyword.replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_");
+            roadNodeService.lambdaQuery()
+                    .eq(RoadNode::getScenicAreaId, scenicAreaId)
+                    .and(w -> w
+                            .like(RoadNode::getName, escapedKeyword)
+                            .or()
+                            .like(RoadNode::getOsmTags, escapedKeyword)
+                    )
+                    .orderByAsc(RoadNode::getName)
+                    .page(page);
+            // Populate scenic area name for frontend display
+            ScenicArea scenic = scenicAreaMapper.selectById(scenicAreaId);
+            if (scenic != null && page.getRecords() != null) {
+                for (RoadNode node : page.getRecords()) {
+                    node.setScenicAreaName(scenic.getName());
+                }
+            }
+            return Response.ok(page);
+        } catch (Exception e) {
+            log.error("搜索节点失败，景区ID: {}, 关键词: {}", scenicAreaId, keyword, e);
+            return Response.error("搜索节点失败: " + e.getMessage());
         }
     }
 

@@ -3,7 +3,12 @@ import type { RouteRecordRaw } from 'vue-router'
 const LoginView = () => import('@/views/LoginView.vue')
 const RegisterView = () => import('@/views/RegisterView.vue')
 const NavigationView = () => import('@/views/NavigationView.vue')
-const PlaceholderPage = () => import('@/views/PlaceholderPage.vue')
+const ScenicView = () => import('@/views/ScenicView.vue')
+const ProfileView = () => import('@/views/ProfileView.vue')
+const DiaryView = () => import('@/views/DiaryView.vue')
+const DiaryDetailView = () => import('@/views/DiaryDetailView.vue')
+const FavoritesView = () => import('@/views/FavoritesView.vue')
+const HistoryView = () => import('@/views/HistoryView.vue')
 const NotFound = () => import('@/views/NotFound.vue')
 
 export const routes: RouteRecordRaw[] = [
@@ -26,7 +31,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/scenic',
     name: 'Scenic',
-    component: PlaceholderPage,
+    component: ScenicView,
     meta: { requiresAuth: true, title: '景点' },
   },
   {
@@ -38,31 +43,31 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/diary',
     name: 'Diary',
-    component: PlaceholderPage,
+    component: DiaryView,
     meta: { requiresAuth: true, title: '日记' },
   },
   {
     path: '/diary/:id',
     name: 'DiaryDetail',
-    component: PlaceholderPage,
+    component: DiaryDetailView,
     meta: { requiresAuth: true, title: '日记详情' },
   },
   {
     path: '/favorites',
     name: 'Favorites',
-    component: PlaceholderPage,
+    component: FavoritesView,
     meta: { requiresAuth: true, title: '收藏' },
   },
   {
     path: '/history',
     name: 'History',
-    component: PlaceholderPage,
+    component: HistoryView,
     meta: { requiresAuth: true, title: '历史' },
   },
   {
     path: '/profile',
     name: 'Profile',
-    component: PlaceholderPage,
+    component: ProfileView,
     meta: { requiresAuth: true, title: '个人中心' },
   },
   {

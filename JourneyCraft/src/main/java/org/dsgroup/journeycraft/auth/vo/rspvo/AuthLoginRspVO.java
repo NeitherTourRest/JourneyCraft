@@ -3,20 +3,20 @@ package org.dsgroup.journeycraft.auth.vo.rspvo;
 import lombok.Data;
 
 /**
- * 登录成功返回数据。
+ * 登录成功返回数据（用户名认证，无 token）。
  */
 @Data
 public class AuthLoginRspVO {
 
-    /** 访问令牌。 */
-    private String token;
+    /** 用户 ID。 */
+    private Long userId;
 
-    /** 刷新令牌。 */
-    private String refreshToken;
+    /** 用户名。 */
+    private String username;
 
-    /** 令牌有效期，单位秒。 */
-    private Integer expiresIn;
+    /** 昵称。 */
+    private String nickname;
 
-    /** 当前登录用户信息。 */
-    private AuthUserRspVO user;
+    /** 头像 URL。 */
+    private String avatarUrl;
 }

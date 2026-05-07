@@ -33,4 +33,19 @@ public class PathNodeDTO {
 
     /** 到达时间（预留，当前为 null） */
     private String arrivalTime;
+
+    /** 是否景区代表节点（用于前端地图标记突出显示） */
+    private Boolean isPrimary;
+
+    /** 是否为目标景区的入口节点（景区间导航时使用） */
+    private Boolean isEntryNode;
+
+    /** 是否为起点景区的出口节点（景区间导航时使用） */
+    private Boolean isExitNode;
+
+    /** 所属景区ID（用于前端景区级导航） */
+    private Long scenicAreaId;
+
+    /** 所属景区名称（用于前端显示） */
+    private String scenicAreaName;
 }

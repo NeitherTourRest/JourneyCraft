@@ -50,23 +50,33 @@ public class NavigationController {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @PostMapping("/route")
-    @Operation(summary = "单目标路径规划", description = "计算从起点到终点的最优路径，支持 Dijkstra 和 A* 两种算法")
+    @Operation(summary = "单目标路径规划", description = "计算从起点到终点的最优路径，支持 Dijkstra 和 A* 两种算法。可指定 endScenicAreaId 自动使用景区多入口，或同时指定 startScenicAreaId+endScenicAreaId 进行景区间路径规划。")
     public Response<PathPlanningService.PathPlanningResult> calculateRoute(
             @Parameter(description = "景区ID", required = true) @RequestParam Long scenicAreaId,
-            @Parameter(description = "起点节点ID", required = true) @RequestParam Long startNodeId,
-            @Parameter(description = "终点节点ID", required = true) @RequestParam Long endNodeId,
+            @Parameter(description = "起点节点ID（与 startScenicAreaId 二选一）") @RequestParam(required = false) Long startNodeId,
+            @Parameter(description = "终点节点ID（与 endScenicAreaId 二选一）") @RequestParam(required = false) Long endNodeId,
             @Parameter(description = "规划策略") @RequestParam(required = false, defaultValue = "shortest_distance") String strategy,
             @Parameter(description = "交通方式: walk/bike/shuttle") @RequestParam(required = false, defaultValue = "walk") String transportMode,
-            @Parameter(description = "算法: dijkstra/astar") @RequestParam(required = false, defaultValue = "dijkstra") String algorithm) {
+            @Parameter(description = "算法: dijkstra/astar") @RequestParam(required = false, defaultValue = "dijkstra") String algorithm,
+            @Parameter(description = "目标景区ID（与 endNodeId 二选一，自动匹配多入口）") @RequestParam(required = false) Long endScenicAreaId,
+            @Parameter(description = "起点景区ID（与 startNodeId 二选一，与 endScenicAreaId 同时指定时进行景区间路径规划）") @RequestParam(required = false) Long startScenicAreaId) {
         try {
-            log.info("单目标路径规划: 景区={}, 起点={}, 终点={}, 策略={}, 交通方式={}, 算法={}", 
-                     scenicAreaId, startNodeId, endNodeId, strategy, transportMode, algorithm);
+            log.info("单目标路径规划: 景区={}, 起点={}, 终点={}, 策略={}, 交通方式={}, 算法={}, 终点景区={}, 起点景区={}", 
+                     scenicAreaId, startNodeId, endNodeId, strategy, transportMode, algorithm, endScenicAreaId, startScenicAreaId);
             
             Integer mode = parseTransportMode(transportMode);
             PathPlanningService.PathPlanningResult result;
-            
-            // 根据算法参数选择 Dijkstra 或 A*
-            if ("astar".equalsIgnoreCase(algorithm)) {
+
+            // ★ 新: 景区到景区路径规划（startScenicAreaId + endScenicAreaId）
+            if (startScenicAreaId != null && endScenicAreaId != null) {
+                result = pathPlanningService.calculateShortestPathBetweenScenicAreas(
+                        startScenicAreaId, endScenicAreaId, mode, strategy);
+            }
+            // ★ 如果指定了 endScenicAreaId，使用景区多入口路径规划
+            else if (endScenicAreaId != null) {
+                result = pathPlanningService.calculateShortestPathToScenic(
+                        endScenicAreaId, startNodeId, mode, strategy);
+            } else if ("astar".equalsIgnoreCase(algorithm)) {
                 result = pathPlanningService.calculateAStarPath(startNodeId, endNodeId, mode, strategy);
             } else {
                 result = pathPlanningService.calculateShortestPath(startNodeId, endNodeId, mode, strategy);

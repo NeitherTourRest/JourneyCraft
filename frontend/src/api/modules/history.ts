@@ -1,4 +1,4 @@
-import request from '@/api/request'
+import { request } from '@/api/request'
 import type { PageResult, PageParams } from '@/types/api'
 
 export const historyApi = {

@@ -80,6 +80,9 @@ onUnmounted(() => {
     map.destroy()
     map = null
   }
+  markers.length = 0
+  polylines.length = 0
+  amapModule = null
 })
 
 // ── Exposed Methods ──
@@ -146,7 +149,11 @@ function drawPolyline(
 
 function clearOverlays() {
   if (map) {
-    map.remove([...markers, ...polylines])
+    try {
+      map.remove([...markers, ...polylines])
+    } catch (err) {
+      console.error('[AmapContainer] clearOverlays failed:', err)
+    }
   }
   markers.length = 0
   polylines.length = 0
@@ -258,7 +265,7 @@ defineExpose({
   width: 32px;
   height: 32px;
   border: 3px solid var(--el-border-color, #dcdfe6);
-  border-top-color: var(--el-color-primary, #FF6B35);
+  border-top-color: var(--el-color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }

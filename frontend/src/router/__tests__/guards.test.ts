@@ -47,7 +47,7 @@ describe('router auth guards', () => {
 
   it('authenticated user accessing /scenic is allowed', async () => {
     const auth = useAuthStore()
-    auth.setAuth({ token: 'tok', refreshToken: 'ref', user: { id: 1, username: 'u', nickname: 'n', avatarUrl: null } })
+    auth.setAuth({ userId: 1, username: 'u', nickname: 'n' })
 
     const router = createTestRouter()
     await router.push('/scenic')
@@ -57,7 +57,7 @@ describe('router auth guards', () => {
 
   it('authenticated user accessing /login is redirected to /', async () => {
     const auth = useAuthStore()
-    auth.setAuth({ token: 'tok', refreshToken: 'ref', user: { id: 1, username: 'u', nickname: 'n', avatarUrl: null } })
+    auth.setAuth({ userId: 1, username: 'u', nickname: 'n' })
 
     const router = createTestRouter()
     await router.push('/login')
@@ -81,7 +81,7 @@ describe('router auth guards', () => {
 
   it('authenticated user accessing /register is redirected to /', async () => {
     const auth = useAuthStore()
-    auth.setAuth({ token: 'tok', refreshToken: 'ref', user: { id: 1, username: 'u', nickname: 'n', avatarUrl: null } })
+    auth.setAuth({ userId: 1, username: 'u', nickname: 'n' })
 
     const router = createTestRouter()
     await router.push('/register')

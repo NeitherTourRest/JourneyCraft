@@ -1,4 +1,4 @@
-import request from '@/api/request'
+import { request } from '@/api/request'
 import type { UserInfo, UserPreferences } from '@/types/user'
 
 export const userApi = {

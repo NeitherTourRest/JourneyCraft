@@ -1,15 +1,100 @@
-// JourneyCraft Travel Theme — Color Palette
-// Warm orange primary for travel/exploration vibe
+// JourneyCraft Design Tokens — Sketch / Hand-Drawn Pencil Style
+// Primary: Pencil Gray (#2c2c2c) | Background: Paper (#f5f0e8)
+// Borders are dashed, shadows are hard offset (no blur) — like a sketchbook
 
-$color-primary: #FF6B35;
-$color-primary-light: #FF8C5A;
-$color-primary-dark: #E55A2B;
+// ═══════════════════════════════════════════════════════════════
+// Design Principles (Sketch Style)
+// ═══════════════════════════════════════════════════════════════
+// - $border-style: dashed (use 2px dashed #2c2c2c borders)
+// - NO gradients, NO soft blur shadows, NO neon colors
+// - Hard offset shadows simulate pencil-drawn drop shadows
+// - Small border radii for a hand-drawn feel
+// ═══════════════════════════════════════════════════════════════
 
-$color-success: #2ECC71;
-$color-warning: #F39C12;
-$color-danger: #E74C3C;
-$color-info: #3498DB;
+// === 主色调：铅笔灰 ===
+$color-primary: #2c2c2c;               // 铅笔灰 — 主色调，按钮背景，文本，边框
+$color-primary-light-1: #4a4a4a;        // 浅灰变体
+$color-primary-light-3: #6b6b6b;        // 中等灰色
+$color-primary-light-5: #8a8a8a;        // 较浅灰色
+$color-primary-light-7: #b5b5b5;        // 浅灰色
+$color-primary-light-8: #d4d4d4;        // 更浅灰色
+$color-primary-light-9: #e8e8e8;        // 最浅灰色（接近纸色）
+$color-primary-dark-2: #1a1a1a;         // 深铅灰色
 
-$color-bg: #FAFBFC;
-$color-text: #2C3E50;
-$color-text-secondary: #7F8C8D;
+// === 强调色 ===
+$color-accent-red: #c85050;             // 红色 — 危险、删除、笔记本红线
+
+// === 状态色（手绘风格 — 哑光、低饱和度） ===
+$color-success: #4a7c59;                // 哑光绿
+$color-warning: #b8860b;                // 暗金色
+$color-danger: #c85050;                 // 铅笔红线
+$color-info: #4a6fa5;                   // 哑光钢蓝
+
+// === 文字颜色（铅笔灰度） ===
+$color-text-primary: #2c2c2c;           // 铅笔黑 — 主要文字
+$color-text-regular: #4a4a4a;           // 常规文字
+$color-text-secondary: #6b6b6b;         // 浅铅笔色 — 次要文字
+$color-text-muted: #8a8a8a;             // 更浅铅笔色 — 占位符、禁用文字
+$color-text-disabled: #b5b5b5;          // 禁用文字
+
+// === 背景颜色（纸色） ===
+$color-bg-page: #f5f0e8;                // 牛皮纸色 — 页面背景
+$color-bg: #faf5ed;                     // 暖米色 — 卡片/面板背景
+$color-bg-overlay: #faf5ed;             // 弹窗/浮层背景
+$color-bg-secondary: #e8e2d8;           // 深纸色 — 二级背景
+$color-bg-light: #fafaf5;               // 浅纸色 — 非常浅的背景
+
+// === 边框颜色（统一铅笔灰） ===
+$color-border: #2c2c2c;                 // 铅笔灰 — 主边框色
+$color-border-light: #6b6b6b;           // 浅边框色
+$color-border-dark: #1a1a1a;            // 深边框色
+
+// === 阴影（硬偏移 — 无模糊，铅笔手绘感） ===
+$shadow-sm: 1px 1px 0px rgba(44, 44, 44, 0.3);
+$shadow-base: 2px 2px 0px rgba(44, 44, 44, 0.3);
+$shadow-lg: 3px 3px 0px rgba(44, 44, 44, 0.3);
+$shadow-xl: 4px 4px 0px rgba(44, 44, 44, 0.3);
+
+// === 悬停阴影（加重偏移） ===
+$shadow-hover-sm: 1px 1px 0px rgba(44, 44, 44, 0.5);
+$shadow-hover: 2px 2px 0px rgba(44, 44, 44, 0.5);
+
+// === 圆角（小 — 手绘感） ===
+$radius-sm: 2px;
+$radius-base: 4px;
+$radius-lg: 6px;
+$radius-xl: 8px;
+$radius-round: 12px;
+
+// === 字号 ===
+$font-xs: 12px;
+$font-sm: 13px;
+$font-base: 14px;
+$font-md: 15px;
+$font-lg: 16px;
+$font-xl: 18px;
+$font-xxl: 22px;
+$font-display: 28px;
+
+// === 字重 ===
+$weight-regular: 400;
+$weight-medium: 500;
+$weight-semibold: 600;
+$weight-bold: 700;
+
+// === 字体（衬线 — 手写铅笔感） ===
+$font-family: 'Crimson Text', 'Noto Serif SC', 'STSong', 'SimSun', Georgia, serif;
+$font-family-mono: 'Crimson Text', 'Noto Serif SC', serif;
+
+// === 间距 ===
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-base: 12px;
+$spacing-md: 16px;
+$spacing-lg: 20px;
+$spacing-xl: 24px;
+$spacing-xxl: 32px;
+
+// === 过渡 ===
+$transition-base: all 0.2s ease;
+$transition-fast: all 0.1s ease;

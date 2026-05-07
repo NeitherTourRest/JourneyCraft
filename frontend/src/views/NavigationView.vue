@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * NavigationView — Core navigation flow for JourneyCraft.
  * Integrates: node loading, route planning (single + multi-target),
@@ -6,19 +6,57 @@
  * map-click interaction, collapsible mobile panel, and session memory.
  */
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Location, Close, RefreshRight, FullScreen } from '@element-plus/icons-vue'
 import { useNavigation } from '@/composables/useNavigation'
 import { request } from '@/api/request'
 import { scenicApi } from '@/api/modules/scenic'
-import { wgs84ToGcj02, pathNodesToGcj02, gcj02ToWgs84, findNearestNode } from '@/utils/coord'
+import { wgs84ToGcj02, pathNodesToGcj02, gcj02ToWgs84 } from '@/utils/coord'
 import AmapContainer from '@/components/map/AmapContainer.vue'
 import type { PathNode, NodeCongestion, NearbyFacility, PhotoSpot } from '@/types/navigation'
+import type { ScenicItem } from '@/types/scenic'
+
+// ── Constants ──
+const MOBILE_BREAKPOINT = 768
+const DEFAULT_MAP_CENTER: [number, number] = [116.397, 39.916]
+const POPUP_AUTO_DISMISS_MS = 8000
+const EMPTY_MARKER_TIMEOUT_MS = 2000
+const NEARBY_SEARCH_RADIUS = 30   // meters — OSM节点密集，30m足够
+const ROUTE_STROKE_WEIGHT = 6
 
 // ──────────────────────────────────────────────
 // Navigation composable
 // ──────────────────────────────────────────────
 const nav = useNavigation()
+const route = useRoute()
+
+// ──────────────────────────────────────────────
+// Scenic autocomplete suggestion shape
+// ──────────────────────────────────────────────
+interface ScenicSearchSuggestion {
+  value: string
+  scenicId: number
+}
+
+// Node search result from the API search endpoint
+interface NodeSearchResult {
+  id?: number
+  nodeId?: number
+  name: string
+  nodeType?: number
+}
+
+// Near-by click search result node
+interface NearbyClickNode {
+  node: PathNode
+  distance: number
+  label: string
+  nodeType: number
+  isScenic: boolean
+  isPoi: boolean
+  _score: number   // 内部评分: labelPriority*1000 - distance
+}
 
 // ──────────────────────────────────────────────
 // Tab state + config
@@ -26,22 +64,18 @@ const nav = useNavigation()
 const activeTab = ref<'route' | 'congestion' | 'facilities' | 'photospots'>('route')
 
 const tabConfigs = [
-  { name: 'route' as const, label: '路线', color: '#FF6B35' },
+  { name: 'route' as const, label: '路线', color: 'var(--el-color-primary)' },
   { name: 'congestion' as const, label: '拥挤度', color: '#E74C3C' },
   { name: 'facilities' as const, label: '设施', color: '#409EFF' },
   { name: 'photospots' as const, label: '拍照点', color: '#E040FB' },
 ]
 
-const activeTabColor = computed(() => tabConfigs.find((t) => t.name === activeTab.value)?.color || '#FF6B35')
-
-const congestionTabDisabled = computed(() => !nav.scenicAreaId.value)
-const facilitiesTabDisabled = computed(() => !nodes.value.length)
-const photospotsTabDisabled = computed(() => !nav.scenicAreaId.value)
+const activeTabColor = computed(() => tabConfigs.find((t) => t.name === activeTab.value)?.color || 'var(--el-color-primary)')
 
 function getTabDisabled(name: string) {
-  if (name === 'congestion') return congestionTabDisabled.value
-  if (name === 'facilities') return facilitiesTabDisabled.value
-  if (name === 'photospots') return photospotsTabDisabled.value
+  if (name === 'congestion') return !nav.scenicAreaId.value
+  if (name === 'facilities') return !nodes.value.length
+  if (name === 'photospots') return !nav.scenicAreaId.value
   return false
 }
 
@@ -52,8 +86,14 @@ const isMobile = ref(false)
 const panelCollapsed = ref(false)
 
 function checkMobile() {
-  isMobile.value = window.innerWidth < 768
+  isMobile.value = window.innerWidth < MOBILE_BREAKPOINT
   if (!isMobile.value) panelCollapsed.value = false
+}
+
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
+function debouncedCheckMobile() {
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(checkMobile, 150)
 }
 
 // ──────────────────────────────────────────────
@@ -65,18 +105,18 @@ const lastScenicHint = ref('')
 // ──────────────────────────────────────────────
 // Facility type map
 // ──────────────────────────────────────────────
-const facilityTypeMap: Record<number, { label: string; icon: string }> = {
-  0: { label: '卫生间', icon: '🚻' },
-  1: { label: '餐饮', icon: '🍴' },
-  2: { label: '超市', icon: '🛒' },
-  3: { label: '停车场', icon: '🅿️' },
-  4: { label: '售票处', icon: '🎫' },
-  5: { label: '游客中心', icon: 'ℹ️' },
-  6: { label: '医疗点', icon: '🏥' },
-  7: { label: 'ATM', icon: '🏧' },
-  8: { label: '自动贩卖机', icon: '🥤' },
-  9: { label: '摆渡车站', icon: '🚍' },
-  10: { label: '自行车租赁', icon: '🚲' },
+const facilityTypeMap: Record<number, { label: string; icon: string; ariaLabel: string }> = {
+  0: { label: '卫生间', icon: '🚻', ariaLabel: '卫生间图标' },
+  1: { label: '餐饮', icon: '🍴', ariaLabel: '餐饮图标' },
+  2: { label: '超市', icon: '🛒', ariaLabel: '超市图标' },
+  3: { label: '停车场', icon: '🅿️', ariaLabel: '停车场图标' },
+  4: { label: '售票处', icon: '🎫', ariaLabel: '售票处图标' },
+  5: { label: '游客中心', icon: 'ℹ️', ariaLabel: '游客中心图标' },
+  6: { label: '医疗点', icon: '🏥', ariaLabel: '医疗点图标' },
+  7: { label: 'ATM', icon: '🏧', ariaLabel: 'ATM图标' },
+  8: { label: '自动贩卖机', icon: '🥤', ariaLabel: '自动贩卖机图标' },
+  9: { label: '摆渡车站', icon: '🚍', ariaLabel: '摆渡车站图标' },
+  10: { label: '自行车租赁', icon: '🚲', ariaLabel: '自行车租赁图标' },
 }
 
 const facilityTypeOptions = Object.entries(facilityTypeMap).map(([value, info]) => ({
@@ -100,7 +140,7 @@ const congestedNodes = computed(() => {
   if (!nav.congestionData.value || !nodes.value.length) return []
   return nav.congestionData.value.nodes
     .map((cn) => {
-      const node = nodes.value.find((n) => n.nodeId === cn.nodeId)
+      const node = nodeMap.value.get(cn.nodeId)
       if (!node) return null
       return { ...cn, name: node.name, latitude: node.latitude, longitude: node.longitude }
     })
@@ -141,12 +181,15 @@ const clickMenuNode = ref<PathNode | null>(null)
 const clickMenuDistance = ref(0)
 const clickMenuPos = ref<{ x: number; y: number } | null>(null)
 
+const nearbyClickNodes = ref<NearbyClickNode[]>([])
+const nearbyClickPos = ref<{ x: number; y: number } | null>(null)
+
 // ──────────────────────────────────────────────
 // Map
 // ──────────────────────────────────────────────
 const mapRef = ref<InstanceType<typeof AmapContainer> | null>(null)
 const mapReady = ref(false)
-const mapCenter = ref<[number, number]>([116.397, 39.916])
+const mapCenter = ref<[number, number]>(DEFAULT_MAP_CENTER)
 
 function onMapReady() {
   mapReady.value = true
@@ -158,55 +201,113 @@ function onMapReady() {
 // ──────────────────────────────────────────────
 const scenicIdInput = ref<number | null>(null)
 const searchKeyword = ref('')
+/**
+ * ── Display nodes vs. routing node map ──────────────────────────────────
+ * nodes.value  = display list: ONE representative node per scenic area.
+ *                Used for map markers (markNodesOnMap) and the sidebar list.
+ *                This is a cumulative list — loading additional scenic areas
+ *                appends their representative nodes without clearing existing.
+ * nodeMap.value = routing source: ALL routeable nodes keyed by nodeId.
+ *                Used for route planning (Dijkstra), setAsStart / addAsEnd,
+ *                node lookups, and the context menu "nearby node" search.
+ *                This map is also cumulative across scenic area loads.
+ * ────────────────────────────────────────────────────────────────────────
+ * This separation avoids displaying hundreds of routing graph nodes on the
+ * map while keeping the full connectivity graph available for pathfinding.
+ * ────────────────────────────────────────────────────────────────────────
+ */
 const nodes = ref<PathNode[]>([])
 const nodesLoading = ref(false)
 const nodesLoadedSuccess = ref(false)
 const nodesLoadedCount = ref(0)
+const nodeMap = ref<Map<number, PathNode>>(new Map())
+const nodeGcjCoords = ref<Map<number, [number, number]>>(new Map())
+
+/** Number of scenic areas currently loaded (one display node per area). */
+const displayCount = computed(() => nodes.value.length)
 
 // ── Node name search (API-backed) ──
 const nodeSearchKeyword = ref('')
-const nodeSearchResults = ref<any[]>([])
-const nodeSearchLoading = ref(false)
+const nodeSearchResults = ref<NodeSearchResult[]>([])
 let nodeSearchTimer: ReturnType<typeof setTimeout> | null = null
 
-watch(activeTab, () => {
-  nodeSearchResults.value = []
-  nodeSearchKeyword.value = ''
-})
+/** Last map click position (WGS-84) for smart search result sorting by proximity. */
+const lastClickPosition = ref<{ lng: number; lat: number } | null>(null)
 
 async function loadNodes() {
   if (!scenicIdInput.value) {
     ElMessage.warning('请输入景区 ID')
     return
   }
-  // Clear old nodes first — prevents stale data if load fails
-  nodes.value = []
+  // ★ 累积加载而非清除 — 保留已加载景区的节点数据
+  // 不清除旧数据，避免已选起点/终点的标签从景区名退化到节点编号
   nodesLoading.value = true
   nodesLoadedSuccess.value = false
   try {
-    const res = await request.get<any[]>('/api/navigation/nodes/scenic/' + scenicIdInput.value)
+    const res = await request.get<PathNode[]>('/api/navigation/nodes/scenic/' + scenicIdInput.value)
     const apiData = res.data as any
     if (apiData.code !== 200) {
       throw new Error(apiData.message || `请求失败 (${apiData.code})`)
     }
     const data = apiData.data
-    nodes.value = (Array.isArray(data) ? data : []).map((n: any) => ({
+    // ★ 使用局部变量存储原始节点，避免污染显示列表 nodes.value
+    const rawNodes = (Array.isArray(data) ? data : []).map((n: Record<string, unknown>) => ({
       ...n,
-      nodeId: n.nodeId ?? n.id ?? n.node_id ?? 0,
+      nodeId: (n['nodeId'] as number) ?? (n['id'] as number) ?? (n['node_id'] as number) ?? 0,
     })) as PathNode[]
+
+    // ★ 智能选择代表节点：优先景区入口 > POI > 有名节点 > 普通节点
+    // 对一个景区只显示最优节点在地图上，但保留路由所需的全部连通性
+    const scenicAreaMap = new Map<number, PathNode>()
+    for (const node of rawNodes) {
+      if (!node.scenicAreaId) {
+        scenicAreaMap.set(node.nodeId, node)
+        continue
+      }
+      const existing = scenicAreaMap.get(node.scenicAreaId)
+      if (!existing) {
+        scenicAreaMap.set(node.scenicAreaId, node)
+        continue
+      }
+      // 评分：isPrimary=100, entrance=80, POI=60, important=40, default=0
+      const score = (n: any) =>
+        (n.isPrimary ? 100 : 0) + (n.nodeType === 0 ? 80 : n.nodeType === 2 ? 60 : (n.isImportant || n.important) ? 40 : 0)
+      if (score(node) > score(existing)) {
+        scenicAreaMap.set(node.scenicAreaId, node)
+      }
+    }
+    // ★ 累积合并到全局路由图 — 不清除已有数据，保证已选起点/终点的标签不会丢失
+    for (const n of rawNodes) {
+      if (!nodeMap.value.has(n.nodeId) || (n.scenicAreaName && !nodeMap.value.get(n.nodeId)?.scenicAreaName)) {
+        nodeMap.value.set(n.nodeId, n)
+      }
+      const gcjCoords = wgs84ToGcj02(n.longitude, n.latitude)
+      nodeGcjCoords.value.set(n.nodeId, gcjCoords)
+    }
+    // 累积显示节点：替换同名景区（避免重复标签），追加新景区
+    for (const dn of scenicAreaMap.values()) {
+      const existingIdx = nodes.value.findIndex(
+        existing => existing.scenicAreaId != null && existing.scenicAreaId === dn.scenicAreaId
+      )
+      if (existingIdx >= 0) {
+        nodes.value[existingIdx] = dn  // 替换旧的同景区节点
+      } else if (!nodes.value.some(existing => existing.nodeId === dn.nodeId)) {
+        nodes.value.push(dn)  // 追加新景区
+      }
+    }
     nav.scenicAreaId.value = scenicIdInput.value
 
-    if (nodes.value.length > 0) {
-      const first = nodes.value[0]
-      const [lng, lat] = wgs84ToGcj02(first.longitude, first.latitude)
+    // ★ 跳转到新加载的景区 (使用 rawNodes, 而非累计列表中的第一个)
+    if (rawNodes.length > 0) {
+      const [lng, lat] = wgs84ToGcj02(rawNodes[0].longitude, rawNodes[0].latitude)
       mapCenter.value = [lng, lat]
     }
 
     if (mapReady.value) {
       markNodesOnMap()
-      // Explicitly move the map to first node (AmapContainer :center may not trigger flyTo)
-      if (nodes.value.length > 0) {
-        const [lng, lat] = wgs84ToGcj02(nodes.value[0].longitude, nodes.value[0].latitude)
+      // Explicitly move the map to new scenic area (not the first loaded one)
+      if (rawNodes.length > 0) {
+        const [lng, lat] = wgs84ToGcj02(rawNodes[0].longitude, rawNodes[0].latitude)
         const map = mapRef.value?.getMap()
         if (map) { map.setCenter([lng, lat]); map.setZoom(16) }
       }
@@ -229,14 +330,35 @@ async function loadNodes() {
   }
 }
 
-async function querySearchScenic(queryString: string, cb: (results: any[]) => void) {
+/**
+ * Approximate haversine distance in meters (fast, no trig heap allocations).
+ * Accurate to ~0.5% for distances < 100 km at mid-latitudes.
+ */
+function haversineApprox(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLat = (lat2 - lat1) * 111320
+  const dLng = (lng2 - lng1) * 111320 * Math.cos(lat1 * Math.PI / 180)
+  return Math.sqrt(dLat * dLat + dLng * dLng)
+}
+
+async function querySearchScenic(queryString: string, cb: (results: ScenicSearchSuggestion[]) => void) {
   if (!queryString || queryString.length < 1) { cb([]); return }
   try {
     const res = await scenicApi.search({ keyword: queryString, page: 1, size: 10 })
     const apiData = res.data as any
     if (apiData.code !== 200) { cb([]); return }
-    const list = apiData.data?.list || []
-    const results = list.map((item: any) => ({
+    let list = apiData.data?.list || []
+
+    // Sort by distance from last click position if available
+    if (lastClickPosition.value && list.length > 0) {
+      const { lat, lng } = lastClickPosition.value
+      list.sort((a: any, b: any) => {
+        const distA = haversineApprox(lat, lng, a.latitude, a.longitude)
+        const distB = haversineApprox(lat, lng, b.latitude, b.longitude)
+        return distA - distB
+      })
+    }
+
+    const results = list.map((item: ScenicItem) => ({
       value: `${item.name} (${item.city || '未知城市'})`,
       scenicId: item.id,
     }))
@@ -247,7 +369,7 @@ async function querySearchScenic(queryString: string, cb: (results: any[]) => vo
   }
 }
 
-function handleScenicSelect(item: any) {
+function handleScenicSelect(item: ScenicSearchSuggestion) {
   scenicIdInput.value = item.scenicId
   searchKeyword.value = item.value
   // Clear stale node search results before loading new scenic
@@ -262,7 +384,7 @@ function handleScenicSelect(item: any) {
 const popupNode = ref<PathNode | null>(null)
 const popupPixel = ref<{ x: number; y: number } | null>(null)
 let popupTimer: ReturnType<typeof setTimeout> | null = null
-let emptyClickMarker: any | null = null
+let emptyClickMarker: any | null = null  // AMap.Marker instance
 
 function handleMarkerClick(node: PathNode, lng: number, lat: number) {
   if (popupTimer) clearTimeout(popupTimer)
@@ -271,7 +393,7 @@ function handleMarkerClick(node: PathNode, lng: number, lat: number) {
   // Auto-dismiss after 8s
   popupTimer = setTimeout(() => {
     if (popupNode.value === node) closePopup()
-  }, 8000)
+  }, POPUP_AUTO_DISMISS_MS)
 }
 
 function closePopup() {
@@ -296,23 +418,26 @@ function setEndFromPopup() {
 function onMapClick(lnglat: [number, number]) {
   closeMenu()
   closePopup()
-  if (nodes.value.length === 0) return
 
   // Convert GCJ-02 (AMap coordinate) to WGS-84 for node lookup
   const [wgsLng, wgsLat] = gcj02ToWgs84(lnglat[0], lnglat[1])
-  const result = findNearestNode(wgsLng, wgsLat, nodes.value, 200)
 
-  if (result) {
-    clickMenuNode.value = result.node
-    clickMenuDistance.value = result.distance
-    clickMenuPos.value = mapRef.value?.lngLatToPixel(lnglat[0], lnglat[1]) ?? null
+  // Save click position for smart search result sorting by proximity
+  lastClickPosition.value = { lng: wgsLng, lat: wgsLat }
 
-    // Auto-center map on the found node
-    const [gcjLng, gcjLat] = wgs84ToGcj02(result.node.longitude, result.node.latitude)
+  // Find nearby nodes in already-loaded routing graph
+  const nearby = findNearbyNodesGrouped(wgsLng, wgsLat)
+
+  if (nearby.length > 0) {
+    nearbyClickNodes.value = nearby
+    nearbyClickPos.value = mapRef.value?.lngLatToPixel(lnglat[0], lnglat[1]) ?? null
+
+    // Auto-center map on the first (closest) node
+    const [gcjLng, gcjLat] = wgs84ToGcj02(nearby[0].node.longitude, nearby[0].node.latitude)
     const map = mapRef.value?.getMap()
     if (map) map.setCenter([gcjLng, gcjLat])
   } else {
-    // Remove previous empty-click dot if exists
+    // Show empty click indicator
     if (emptyClickMarker) {
       try { mapRef.value?.getMap()?.remove(emptyClickMarker) } catch {}
       emptyClickMarker = null
@@ -327,7 +452,7 @@ function onMapClick(lnglat: [number, number]) {
           try { mapRef.value?.getMap()?.remove(emptyClickMarker) } catch {}
           emptyClickMarker = null
         }
-      }, 2000)
+      }, EMPTY_MARKER_TIMEOUT_MS)
     }
     ElMessage.info('该位置附近未找到路网节点')
   }
@@ -353,27 +478,111 @@ function menuFocusNode() {
 function closeMenu() {
   clickMenuNode.value = null
   clickMenuPos.value = null
+  nearbyClickNodes.value = []
+  nearbyClickPos.value = null
+}
+
+// ── Smart nearby node search (used by onMapClick) ──
+function findNearbyNodesGrouped(wgsLng: number, wgsLat: number): NearbyClickNode[] {
+  const results: NearbyClickNode[] = []
+  const avgLat = (wgsLat * Math.PI) / 180
+  const cosLat = Math.cos(avgLat)
+
+  for (const [_nodeId, node] of nodeMap.value) {
+    const dx = (node.longitude - wgsLng) * 111320 * cosLat
+    const dy = (node.latitude - wgsLat) * 111320
+    const dist = Math.sqrt(dx * dx + dy * dy)
+
+    if (dist <= NEARBY_SEARCH_RADIUS) {
+      // 标签优先级评分: scenic=100, POI=80, named=60, fallback=0
+      const n = node as any
+      const labelScore = node.scenicAreaName ? 100 
+        : (n.nodeType === 2 && node.name) ? 80 
+        : node.name ? 60 
+        : 0
+      results.push({
+        node,
+        distance: Math.round(dist),
+        label: getSmartClickLabel(node),
+        nodeType: n.nodeType ?? 5,
+        isScenic: !!node.scenicAreaId,
+        isPoi: (n.nodeType === 2),
+        _score: labelScore * 1000 - dist, // 高分标签优先，距离近的优先
+      })
+    }
+  }
+
+  // 按综合评分降序（标签优先级高 + 距离近 = 排前面）
+  results.sort((a, b) => (b as any)._score - (a as any)._score)
+  return results.slice(0, 1) // 只返回最优的一个
+}
+
+function getSmartClickLabel(node: PathNode): string {
+  // Priority: scenic area > POI name > node name > fallback
+  if (node.scenicAreaName) return node.scenicAreaName
+  const n = node as any
+  if (n.nodeType === 2 && node.name) return node.name  // POI
+  if (node.name) return node.name
+  return `节点 #${node.nodeId}`
+}
+
+function setStartFromNearby(item: NearbyClickNode) {
+  setAsStart(item.node)
+  closeMenu()
+}
+
+function setEndFromNearby(item: NearbyClickNode) {
+  addAsEnd(item.node)
+  closeMenu()
+}
+
+// ──────────────────────────────────────────────
+// Unified marker renderer — handles clearOverlays,
+// closePopup, GCJ-02 coord lookup (precomputed with
+// fallback to on-the-fly conversion), and error wrapping.
+// ──────────────────────────────────────────────
+function renderMarkersOnMap<T extends { longitude?: number; latitude?: number }>(
+  items: T[],
+  renderFn: (item: T, gcjLng: number, gcjLat: number) => void,
+) {
+  try {
+    const map = mapRef.value
+    if (!map) return
+    map.clearOverlays()
+    closePopup()
+    for (const item of items) {
+      const nodeId = (item as any).nodeId ?? (item as any).id
+      let coords: [number, number] | undefined
+      if (nodeId != null) {
+        coords = nodeGcjCoords.value.get(nodeId)
+      }
+      if (!coords) {
+        if (item.longitude == null || item.latitude == null) continue
+        coords = wgs84ToGcj02(item.longitude, item.latitude)
+      }
+      const [gcjLng, gcjLat] = coords
+      renderFn(item, gcjLng, gcjLat)
+    }
+  } catch (err) {
+    console.error('[Nav] renderMarkersOnMap failed:', err)
+  }
 }
 
 // ──────────────────────────────────────────────
 // Node markers on map (with click handlers)
 // ──────────────────────────────────────────────
 function markNodesOnMap() {
-  if (!mapRef.value) return
-  mapRef.value.clearOverlays()
-  closePopup()
-
-  for (const node of nodes.value) {
-    const [lng, lat] = wgs84ToGcj02(node.longitude, node.latitude)
+  renderMarkersOnMap(nodes.value, (node, lng, lat) => {
     const isStart = node.nodeId === nav.startNodeId.value
     const isEnd = nav.endNodeIds.value.includes(node.nodeId)
 
     let color = '#909399'
     if (isStart) color = '#67C23A'
-    else if (isEnd) color = '#FF6B35'
+    else if (isEnd) color = '#E74C3C'
 
-    mapRef.value.addTextMarker(lng, lat, node.name, color, () => handleMarkerClick(node, lng, lat))
-  }
+    const displayName = node.scenicAreaName || node.name
+    mapRef.value?.addTextMarker(lng, lat, displayName, color, () => handleMarkerClick(node, lng, lat))
+  })
 }
 
 watch(mapReady, (ready) => {
@@ -388,88 +597,20 @@ const nodeSearch = ref('')
 const filteredNodes = computed(() => {
   if (!nodeSearch.value) return nodes.value
   const kw = nodeSearch.value.toLowerCase()
-  return nodes.value.filter((n) => n.name.toLowerCase().includes(kw))
-})
-
-// ──────────────────────────────────────────────
-// API node search (debounced)
-// ──────────────────────────────────────────────
-function onNodeSearchInput(_val: string) {
-  if (nodeSearchTimer) clearTimeout(nodeSearchTimer)
-  // Read keyword reactively — val may be stale by the time debounce fires
-  if (!nodeSearchKeyword.value || nodeSearchKeyword.value.length < 1) { nodeSearchResults.value = []; return }
-
-  nodeSearchTimer = setTimeout(async () => {
-    if (!nav.scenicAreaId.value) return
-    const keyword = nodeSearchKeyword.value  // capture latest at fire time
-    if (!keyword) return
-    nodeSearchLoading.value = true
-    try {
-      const res = await request.get<any>('/api/navigation/nodes/search', {
-        params: { scenicAreaId: nav.scenicAreaId.value, keyword, pageSize: 20, pageNum: 1 },
-      })
-      const apiData = res.data as any
-      // Check for 404 or not-implemented
-      if (apiData.code === 404 || apiData.status === 404) {
-        ElMessage.warning('节点搜索功能暂不可用')
-        nodeSearchResults.value = []
-        return
-      }
-      if (apiData.code !== 200) { nodeSearchResults.value = []; return }
-      nodeSearchResults.value = apiData.data?.list || apiData.data?.records || []
-    } catch (err: any) {
-      // Graceful degradation: if API not implemented (404)
-      if (err?.response?.status === 404 || err?.status === 404) {
-        ElMessage.warning('节点搜索功能暂不可用')
-      }
-      nodeSearchResults.value = []
-    } finally {
-      nodeSearchLoading.value = false
-    }
-  }, 300)
-}
-
-function getNodeTypeLabel(type: number | null | undefined): string {
-  const labels: Record<number, string> = { 0: '入口', 1: '路口', 2: 'POI', 3: '设施入口', 4: '拍照点', 5: '普通节点' }
-  return labels[type ?? 5] || '未知'
-}
-
-function focusNodeOnMap(node: any) {
-  const pathNode = nodes.value.find((n) => n.nodeId === (node.id ?? node.nodeId))
-  if (!pathNode || !mapRef.value) return
-
-  const [lng, lat] = wgs84ToGcj02(pathNode.longitude, pathNode.latitude)
-  // Don't call markNodesOnMap() here — it calls clearOverlays() which destroys drawn routes
-  mapRef.value.addMarker(lng, lat, {
-    content: `<div style="background:#FF6B35;color:white;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:600">${pathNode.name}</div>`,
+  return nodes.value.filter((n) => {
+    const displayName = n.scenicAreaName || n.name
+    return displayName.toLowerCase().includes(kw)
   })
-  // Focus map on this node
-  const map = mapRef.value.getMap()
-  if (map) map.setCenter([lng, lat])
-  if (map) map.setZoom(17)
-
-  // Trigger the marker popup for this node
-  handleMarkerClick(pathNode, lng, lat)
-}
-
-function setAsStartFromSearch(node: any) {
-  const pathNode = nodes.value.find((n) => n.nodeId === (node.id ?? node.nodeId))
-  if (pathNode) setAsStart(pathNode)
-  nodeSearchResults.value = []
-  nodeSearchKeyword.value = ''
-}
-function addAsEndFromSearch(node: any) {
-  const pathNode = nodes.value.find((n) => n.nodeId === (node.id ?? node.nodeId))
-  if (pathNode) addAsEnd(pathNode)
-  nodeSearchResults.value = []
-  nodeSearchKeyword.value = ''
-}
+})
 
 // ──────────────────────────────────────────────
 // Node selection helpers
 // ──────────────────────────────────────────────
 function setAsStart(node: PathNode) {
   nav.setStartNode(node.nodeId)
+  if (node.scenicAreaId) {
+    nav.startScenicAreaId.value = node.scenicAreaId
+  }
   markNodesOnMap()
 }
 
@@ -481,11 +622,18 @@ function addAsEnd(node: PathNode) {
       nav.addEndNode(node.nodeId)
     }
   }
+  // ★ Set endScenicAreaId for scenic-area-level route calculation
+  if (node.scenicAreaId) {
+    nav.endScenicAreaId.value = node.scenicAreaId
+  }
   markNodesOnMap()
 }
 
 function removeEndNode(nodeId: number) {
   nav.removeEndNode(nodeId)
+  if (nav.endNodeIds.value.length === 0) {
+    nav.endScenicAreaId.value = null
+  }
   markNodesOnMap()
 }
 
@@ -497,9 +645,10 @@ const isMultiTarget = ref(false)
 // ──────────────────────────────────────────────
 // Route planning
 // ──────────────────────────────────────────────
-const segmentColors = ['#FF6B35', '#3498DB', '#2ECC71', '#F39C12', '#9B59B6']
+const segmentColors = ['#33E9D1', '#3498DB', '#2ECC71', '#F39C12', '#9B59B6']
 
 async function handlePlanRoute() {
+  if (nav.loading.value) return
   if (!nav.scenicAreaId.value) {
     ElMessage.warning('请先加载景区路网')
     return
@@ -527,61 +676,90 @@ async function handlePlanRoute() {
 }
 
 function drawSingleRoute() {
-  if (!mapRef.value || !nav.routePath.value) return
-  mapRef.value.clearOverlays()
-  markNodesOnMap()
-  mapRef.value.drawPolyline(nav.routePath.value, {
-    strokeColor: '#FF6B35',
-    strokeWeight: 6,
-    showDir: true,
-  })
-  mapRef.value.setFitView()
+  try {
+    if (!mapRef.value || !nav.routePath.value) return
+    mapRef.value.clearOverlays()
+    markNodesOnMap()
+    mapRef.value.drawPolyline(nav.routePath.value, {
+      strokeColor: '#33E9D1',
+      strokeWeight: ROUTE_STROKE_WEIGHT,
+      showDir: true,
+    })
+    mapRef.value.setFitView()
+  } catch (err) {
+    console.error('[Nav] drawSingleRoute failed:', err)
+  }
 }
 
 function drawMultiRoute() {
-  if (!mapRef.value || !nav.multiRoute.value) return
-  mapRef.value.clearOverlays()
-  markNodesOnMap()
+  try {
+    if (!mapRef.value || !nav.multiRoute.value) return
+    mapRef.value.clearOverlays()
+    markNodesOnMap()
 
-  const segments = nav.multiRoute.value.segments
-  for (let i = 0; i < segments.length; i++) {
-    const path = pathNodesToGcj02(segments[i].nodes)
-    mapRef.value.drawPolyline(path, {
-      strokeColor: segmentColors[i % segmentColors.length],
-      strokeWeight: 6,
-      showDir: true,
-    })
+    const segments = nav.multiRoute.value.segments
+    for (let i = 0; i < segments.length; i++) {
+      const path = pathNodesToGcj02(segments[i].nodes)
+      mapRef.value.drawPolyline(path, {
+        strokeColor: segmentColors[i % segmentColors.length],
+        strokeWeight: ROUTE_STROKE_WEIGHT,
+        showDir: true,
+      })
+    }
+    mapRef.value.setFitView()
+  } catch (err) {
+    console.error('[Nav] drawMultiRoute failed:', err)
   }
-  mapRef.value.setFitView()
 }
 
 // ──────────────────────────────────────────────
 // Clear / Reset
 // ──────────────────────────────────────────────
 function clearRoute() {
-  mapRef.value?.clearOverlays()
-  markNodesOnMap()
-  nav.currentRoute.value = null
-  nav.multiRoute.value = null
-  ElMessage.success('路线已清除')
+  try {
+    mapRef.value?.clearOverlays()
+    markNodesOnMap()
+    nav.currentRoute.value = null
+    nav.multiRoute.value = null
+    ElMessage.success('路线已清除')
+  } catch (err) {
+    console.error('[Nav] clearRoute failed:', err)
+  }
+}
+
+async function confirmReset() {
+  try {
+    await ElMessageBox.confirm('确定要重置全部吗？这将清除已加载的景区、路线和所有选择。', '确认重置', {
+      confirmButtonText: '确定重置',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    resetAll()
+  } catch { /* user cancelled */ }
 }
 
 function resetAll() {
-  nav.reset()
-  nav.scenicAreaId.value = null  // clear stale scenic ID
-  nodes.value = []
-  scenicIdInput.value = null
-  nodesLoadedSuccess.value = false
-  nodesLoadedCount.value = 0
-  mapRef.value?.clearOverlays()
-  closePopup()
-  closeMenu()
-  nearbyFacilities.value = []
-  photoSpots.value = []
-  selectedFacilityNodeId.value = null
-  facilityTypeFilter.value = undefined
-  activeTab.value = 'route'
-  // Clear stale search state
+  try {
+    nav.reset()
+    nav.scenicAreaId.value = null  // clear stale scenic ID
+    nodes.value = []
+    nodeMap.value = new Map()
+    nodeGcjCoords.value = new Map()
+    scenicIdInput.value = null
+    nodesLoadedSuccess.value = false
+    nodesLoadedCount.value = 0
+    mapRef.value?.clearOverlays()
+    closePopup()
+    closeMenu()
+    nearbyFacilities.value = []
+    photoSpots.value = []
+    selectedFacilityNodeId.value = null
+    facilityTypeFilter.value = undefined
+    activeTab.value = 'route'
+    // Clear stale search state
+  } catch (err) {
+    console.error('[Nav] resetAll failed:', err)
+  }
   searchKeyword.value = ''
   nodeSearch.value = ''
   nodeSearchResults.value = []
@@ -617,19 +795,13 @@ async function loadAndShowCongestion() {
 }
 
 function markCongestionOnMap() {
-  if (!mapRef.value) return
-  mapRef.value.clearOverlays()
-  closePopup()
-
-  for (const cn of congestedNodes.value) {
-    const [lng, lat] = wgs84ToGcj02(cn.longitude, cn.latitude)
+  renderMarkersOnMap(congestedNodes.value, (cn, lng, lat) => {
     const info = congestionLevelMap[cn.level] || { markerColor: '#909399', label: '未知' }
     const isHeavy = cn.level >= 2
-
-    mapRef.value.addMarker(lng, lat, {
+    mapRef.value?.addMarker(lng, lat, {
       content: `<div style="background:${info.markerColor};color:white;padding:2px 6px;border-radius:4px;font-size:${isHeavy ? '13px' : '11px'};white-space:nowrap;font-weight:${isHeavy ? '600' : '400'}">${cn.name}</div>`,
     })
-  }
+  })
 }
 
 // ──────────────────────────────────────────────
@@ -658,15 +830,11 @@ async function loadAndShowFacilities() {
 }
 
 function markFacilitiesOnMap() {
-  if (!mapRef.value) return
-  mapRef.value.clearOverlays()
-  closePopup()
-  for (const fac of nearbyFacilities.value) {
-    const [lng, lat] = wgs84ToGcj02(fac.longitude, fac.latitude)
+  renderMarkersOnMap(nearbyFacilities.value, (fac, lng, lat) => {
     const typeInfo = facilityTypeMap[fac.type] || { label: '设施', icon: '📍' }
-    mapRef.value.addTextMarker(lng, lat, `${typeInfo.icon} ${fac.name}`, '#409EFF')
-  }
-  mapRef.value.setFitView()
+    mapRef.value?.addTextMarker(lng, lat, `${typeInfo.icon} ${fac.name}`, '#409EFF')
+  })
+  mapRef.value?.setFitView()
 }
 
 // ──────────────────────────────────────────────
@@ -692,14 +860,10 @@ async function loadAndShowPhotoSpots() {
 }
 
 function markPhotoSpotsOnMap() {
-  if (!mapRef.value) return
-  mapRef.value.clearOverlays()
-  closePopup()
-  for (const spot of photoSpots.value) {
-    const [lng, lat] = wgs84ToGcj02(spot.longitude, spot.latitude)
-    mapRef.value.addTextMarker(lng, lat, `📷 ${spot.name}`, '#E040FB')
-  }
-  mapRef.value.setFitView()
+  renderMarkersOnMap(photoSpots.value, (spot, lng, lat) => {
+    mapRef.value?.addTextMarker(lng, lat, `📷 ${spot.name}`, '#E040FB')
+  })
+  mapRef.value?.setFitView()
 }
 
 // ──────────────────────────────────────────────
@@ -710,10 +874,14 @@ const mapContainerRef = ref<HTMLElement | null>(null)
 function toggleFullscreen() {
   const el = mapContainerRef.value
   if (!el) return
-  if (document.fullscreenElement) {
-    document.exitFullscreen()
-  } else {
-    el.requestFullscreen()
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      el.requestFullscreen()
+    }
+  } catch (err) {
+    console.error('[Nav] Fullscreen toggle failed:', err)
   }
 }
 
@@ -721,6 +889,8 @@ function toggleFullscreen() {
 // Tab-switch watch: redraw markers, preserve route overlay
 // ──────────────────────────────────────────────
 watch(activeTab, (tab) => {
+  nodeSearchResults.value = []
+  nodeSearchKeyword.value = ''
   if (!mapRef.value) return
 
   switch (tab) {
@@ -766,13 +936,27 @@ watch(activeTab, (tab) => {
 // ──────────────────────────────────────────────
 const startNodeName = computed(() => {
   if (!nav.startNodeId.value) return ''
-  return nodes.value.find((n) => n.nodeId === nav.startNodeId.value)?.name || `节点 #${nav.startNodeId.value}`
+  if (nav.startScenicAreaId.value) {
+    // When start is a scenic area, find its representative node's scenicAreaName
+    const node = nodeMap.value.get(nav.startNodeId.value)
+    return node?.scenicAreaName || node?.name || `景区 #${nav.startScenicAreaId.value}`
+  }
+  const node = nodeMap.value.get(nav.startNodeId.value)
+  return node?.scenicAreaName || node?.name || `节点 #${nav.startNodeId.value}`
+})
+
+/** Always shows scenic area name when the start was chosen via scenic-area-level selection. */
+const startScenicName = computed(() => {
+  if (!nav.startScenicAreaId.value) return null
+  const node = nodeMap.value.get(nav.startNodeId.value!)
+  return node?.scenicAreaName || null
 })
 
 const endNodeNames = computed(() =>
-  nav.endNodeIds.value.map(
-    (id) => nodes.value.find((n) => n.nodeId === id)?.name || `节点 #${id}`,
-  ),
+  nav.endNodeIds.value.map((id) => {
+    const node = nodeMap.value.get(id)
+    return node?.scenicAreaName || node?.name || `节点 #${id}`
+  }),
 )
 
 const isrouteReady = computed(() => !!(nav.currentRoute.value || nav.multiRoute.value))
@@ -786,8 +970,6 @@ const multiRouteTime = computed(() => {
   if (!nav.multiRoute.value) return null
   return Math.floor(nav.multiRoute.value.totalTime / 60) + ' min'
 })
-
-const routeSegmentsCount = computed(() => nav.multiRoute.value?.segments?.length ?? 0)
 
 // Route summary for overlays (distance + time + strategy)
 const routeSummaryDistance = computed(() => nav.distanceKm.value || multiRouteDistance.value || '')
@@ -808,7 +990,7 @@ const routeSummaryMode = computed(() => {
 // ── Node color helper (for list badges) ──
 function getNodeColor(node: PathNode): string {
   if (node.nodeId === nav.startNodeId.value) return '#67C23A'
-  if (nav.endNodeIds.value.includes(node.nodeId)) return '#FF6B35'
+  if (nav.endNodeIds.value.includes(node.nodeId)) return '#E74C3C'
   return '#909399'
 }
 
@@ -816,6 +998,57 @@ function getNodeBadge(node: PathNode): string | null {
   if (node.nodeId === nav.startNodeId.value) return '已选为起点'
   if (nav.endNodeIds.value.includes(node.nodeId)) return '已选为终点'
   return null
+}
+
+// ──────────────────────────────────────────────
+// Advanced toggle: show/hide node list
+// ──────────────────────────────────────────────
+const showNodeList = ref(false)
+
+function getCurrentScenicName(): string {
+  return nodes.value[0]?.scenicAreaName || '当前景区'
+}
+
+function clearStart() {
+  nav.startNodeId.value = null
+  nav.startScenicAreaId.value = null
+  markNodesOnMap()
+}
+
+function clearEnd() {
+  nav.endNodeIds.value = []
+  nav.endScenicAreaId.value = null
+  markNodesOnMap()
+}
+
+function swapStartEnd() {
+  const tempNodeId = nav.startNodeId.value
+  const tempScenicId = nav.startScenicAreaId.value
+  nav.startNodeId.value = nav.endNodeIds.value[0] || null
+  nav.startScenicAreaId.value = nav.endScenicAreaId.value
+  nav.endNodeIds.value = tempNodeId ? [tempNodeId] : []
+  nav.endScenicAreaId.value = tempScenicId
+  markNodesOnMap()
+}
+
+function handleStartSelect(item: ScenicSearchSuggestion) {
+  scenicIdInput.value = item.scenicId
+  searchKeyword.value = item.value
+  loadNodes().then(() => {
+    if (nodes.value.length > 0) {
+      setAsStart(nodes.value[0])
+    }
+  })
+}
+
+function handleEndSelect(item: ScenicSearchSuggestion) {
+  scenicIdInput.value = item.scenicId
+  searchKeyword.value = item.value
+  loadNodes().then(() => {
+    if (nodes.value.length > 0) {
+      addAsEnd(nodes.value[0])
+    }
+  })
 }
 
 // ──────────────────────────────────────────────
@@ -843,7 +1076,7 @@ function fabClearRoute() {
 
 function fabReset() {
   closeFab()
-  resetAll()
+  confirmReset()
 }
 
 // ──────────────────────────────────────────────
@@ -859,10 +1092,14 @@ function handleKeydown(e: KeyboardEvent) {
 // ──────────────────────────────────────────────
 // Lifecycle
 // ──────────────────────────────────────────────
-onMounted(() => {
+onMounted(async () => {
   checkMobile()
-  window.addEventListener('resize', checkMobile)
+  window.addEventListener('resize', debouncedCheckMobile)
   window.addEventListener('keydown', handleKeydown)
+
+  // Check route param first (takes priority)
+  const scenicIdFromRoute = route.params.scenicId
+  const hasRouteParam = scenicIdFromRoute && !isNaN(Number(scenicIdFromRoute))
 
   // Restore session memory
   const saved = localStorage.getItem(SESSION_KEY)
@@ -872,16 +1109,32 @@ onMounted(() => {
       if (data.scenicId) {
         scenicIdInput.value = data.scenicId
         lastScenicHint.value = `上次景区 ID: ${data.scenicId}`
+        // Auto-load from session only if no route param
+        if (!hasRouteParam) {
+          loadNodes()
+        }
       }
     } catch {
       /* ignore corrupted data */
     }
   }
+
+  // Auto-load from route param if present
+  if (hasRouteParam) {
+    scenicIdInput.value = Number(scenicIdFromRoute)
+    await loadNodes()
+  }
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
+  window.removeEventListener('resize', debouncedCheckMobile)
   window.removeEventListener('keydown', handleKeydown)
+  if (nodeSearchTimer) clearTimeout(nodeSearchTimer)
+  if (popupTimer) clearTimeout(popupTimer)
+  if (resizeTimer) clearTimeout(resizeTimer)
+  if (emptyClickMarker && mapRef.value) {
+    try { mapRef.value.getMap()?.remove(emptyClickMarker) } catch { /* ignore */ }
+  }
 })
 </script>
 
@@ -892,8 +1145,8 @@ onUnmounted(() => {
       <!------ Header ------>
       <div class="panel-header">
         <h2 class="panel-title">路线导航</h2>
-        <p class="panel-desc" v-if="nodes.length">景区已加载 · {{ nodes.length }} 个节点</p>
-        <p class="panel-desc" v-else>加载景区路网，规划游览路径</p>
+        <p class="panel-desc" v-if="nodes.length">{{ getCurrentScenicName() }} · {{ displayCount }} 个景区已加载</p>
+        <p class="panel-desc" v-else>搜索景区名称，规划游览路径</p>
       </div>
 
       <!-- Tabs with colored active indicator -->
@@ -914,74 +1167,125 @@ onUnmounted(() => {
         <!-- ══ WELCOME CARD (when no nodes loaded) ══ -->
         <div v-if="!nodes.length && !nodesLoading" class="welcome-card">
           <div class="welcome-icon">🗺️</div>
-          <h3 class="welcome-heading">选择一个景区开始规划路线</h3>
-          <p class="welcome-desc">输入景区 ID 加载路网节点，在地图上选择起点和终点即可规划游览路径。</p>
+          <h3 class="welcome-heading">探索你的旅程</h3>
+          <p class="welcome-desc">搜索景区名称，规划游览路线</p>
 
           <div class="welcome-search">
             <el-autocomplete
               v-model="searchKeyword"
               :fetch-suggestions="querySearchScenic"
-              placeholder='搜索景区名称（如"故宫"）'
+              placeholder="搜索景区名称..."
               :trigger-on-focus="false"
               prefix-icon="Search"
               size="large"
               class="scenic-search-input"
               @select="handleScenicSelect"
             />
-            <p class="welcome-hint">💡 提示: 输入景区名称搜索，如"故宫"、"颐和园"</p>
-            <p v-if="lastScenicHint" class="welcome-hint session-hint">{{ lastScenicHint }}</p>
+            <div class="example-chips">
+              <span class="example-chip" @click="searchKeyword='故宫'; querySearchScenic('故宫', (r) => { if(r.length) handleScenicSelect(r[0]) })">故宫</span>
+              <span class="example-chip" @click="searchKeyword='颐和园'; querySearchScenic('颐和园', (r) => { if(r.length) handleScenicSelect(r[0]) })">颐和园</span>
+              <span class="example-chip" @click="searchKeyword='八达岭'; querySearchScenic('八达岭', (r) => { if(r.length) handleScenicSelect(r[0]) })">八达岭长城</span>
+            </div>
           </div>
         </div>
 
         <!-- ══ REGULAR CONTENT (when nodes loaded) ══ -->
         <template v-else>
-          <!------ Scenic search (compact, for switching) ------>
-          <div class="panel-section">
+          <!------ Current Scenic Bar ------>
+          <div class="current-scenic-bar">
+            <span class="current-scenic-name">🏔️ {{ getCurrentScenicName() }}</span>
+            <span class="current-scenic-count">· {{ displayCount }} 个景区已加载</span>
             <el-autocomplete
               v-model="searchKeyword"
               :fetch-suggestions="querySearchScenic"
-              placeholder="切换到其他景区..."
+              placeholder="切换景区..."
               :trigger-on-focus="false"
               prefix-icon="Search"
-              size="default"
-              class="scenic-search-input"
+              size="small"
+              class="scenic-switch-input"
               @select="handleScenicSelect"
             />
-            <div v-if="nodesLoadedSuccess && !nodesLoading" class="load-success-inline">
-              <span class="success-check">✓</span> 已加载 {{ nodesLoadedCount }} 个路网节点
+          </div>
+
+          <!------ FROM→TO Selection Cards ------>
+          <div class="fromto-section">
+            <!-- Start Point -->
+            <div class="fromto-card start-card">
+              <div class="fromto-label">🚩 起点</div>
+              <div class="fromto-value" v-if="startNodeName">
+                <span class="fromto-name">{{ startScenicName || startNodeName }}</span>
+                <el-button text size="small" class="fromto-clear" @click="clearStart()">✕</el-button>
+              </div>
+              <el-autocomplete
+                v-else
+                v-model="searchKeyword"
+                :fetch-suggestions="querySearchScenic"
+                placeholder="搜索起点景区..."
+                :trigger-on-focus="false"
+                size="small"
+                @select="handleStartSelect"
+              />
+            </div>
+
+            <!-- Swap Button -->
+            <div class="fromto-swap" v-if="startNodeName && endNodeNames.length" @click="swapStartEnd()">
+              ⇅ 交换
+            </div>
+
+            <!-- End Point -->
+            <div class="fromto-card end-card">
+              <div class="fromto-label">🏁 终点</div>
+              <div class="fromto-value" v-if="endNodeNames.length">
+                <span class="fromto-name">{{ endNodeNames[0] }}</span>
+                <el-button text size="small" class="fromto-clear" @click="clearEnd()">✕</el-button>
+                <div class="extra-ends" v-if="endNodeNames.length > 1">
+                  <span v-for="(name, idx) in endNodeNames.slice(1)" :key="idx" class="extra-end-tag">
+                    {{ name }}
+                    <el-button text size="small" @click="removeEndNode(nav.endNodeIds.value[idx + 1])">✕</el-button>
+                  </span>
+                </div>
+              </div>
+              <el-autocomplete
+                v-else
+                v-model="searchKeyword"
+                :fetch-suggestions="querySearchScenic"
+                placeholder="搜索终点景区..."
+                :trigger-on-focus="false"
+                size="small"
+                @select="handleEndSelect"
+              />
             </div>
           </div>
 
-          <!------ Node name search (API-backed) ------>
-          <div class="panel-section" v-if="nodes.length">
-            <el-input
-              v-model="nodeSearchKeyword"
-              placeholder="搜索景区内的路网节点..."
-              :prefix-icon="Search"
-              clearable
-              @input="onNodeSearchInput"
-              @clear="nodeSearchResults = []"
-            />
-
-            <!-- Search results -->
-            <div v-if="nodeSearchResults.length > 0" class="search-results">
-              <div
-                v-for="r in nodeSearchResults"
-                :key="r.id || r.nodeId"
-                class="search-result-item"
-              >
-                <div class="result-main" @click="focusNodeOnMap(r)">
-                  <span class="result-name">{{ r.name }}</span>
-                  <span class="result-type">{{ getNodeTypeLabel(r.nodeType) }}</span>
-                </div>
-                <div class="result-actions">
-                  <button class="result-btn result-btn-start" @click.stop="setAsStartFromSearch(r)" title="设为起点">🟢</button>
-                  <button class="result-btn result-btn-end" @click.stop="addAsEndFromSearch(r)" title="设为终点">🟠</button>
-                </div>
+          <!------ Route info — prominent card (when route is planned) ------>
+          <div class="route-result-card" v-if="isrouteReady">
+            <div class="route-result-header">✅ 路线规划完成</div>
+            <div class="route-result-body">
+              <div class="route-result-path">
+                🚩 {{ startNodeName }} → 🏔️ {{ endNodeNames[0] || '终点' }}
               </div>
-            </div>
-            <div v-else-if="nodeSearchKeyword && !nodeSearchLoading" class="search-empty">
-              未找到匹配节点
+              <div class="route-result-meta">
+                <span class="route-result-stat">
+                  <span class="stat-label">距离</span>
+                  <span class="stat-value">{{ nav.distanceKm.value || multiRouteDistance || '—' }}</span>
+                </span>
+                <span class="route-result-stat">
+                  <span class="stat-label">预计</span>
+                  <span class="stat-value">{{ nav.estimatedTimeMin.value || multiRouteTime || '—' }}</span>
+                </span>
+                <span class="route-result-stat">
+                  <span class="stat-label">策略</span>
+                  <span class="stat-value stat-tag">{{ routeSummaryStrategy }}</span>
+                </span>
+                <span class="route-result-stat">
+                  <span class="stat-label">方式</span>
+                  <span class="stat-value stat-tag">{{ routeSummaryMode }}</span>
+                </span>
+              </div>
+              <div class="route-result-actions">
+                <el-button size="small" :icon="Close" @click="clearRoute">清除路线</el-button>
+                <el-button size="small" :icon="RefreshRight" @click="confirmReset" type="danger" plain>重置</el-button>
+              </div>
             </div>
           </div>
 
@@ -998,9 +1302,9 @@ onUnmounted(() => {
           <div class="panel-section">
             <label class="section-label">交通方式</label>
             <el-radio-group v-model="nav.transportMode.value" size="default">
-              <el-radio-button value="walk">步行</el-radio-button>
-              <el-radio-button value="bike">骑行</el-radio-button>
-              <el-radio-button value="shuttle">接驳车</el-radio-button>
+              <el-radio-button value="walk">🚶 步行</el-radio-button>
+              <el-radio-button value="bike">🚲 骑行</el-radio-button>
+              <el-radio-button value="shuttle">🛺 摆渡</el-radio-button>
             </el-radio-group>
           </div>
 
@@ -1012,99 +1316,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!------ Selected nodes display ------>
-          <div class="panel-section node-selection">
-            <div class="selected-row">
-              <span class="selected-label">起点</span>
-              <el-tag v-if="startNodeName" type="success" size="small" effect="plain">
-                {{ startNodeName }}
-              </el-tag>
-              <span v-else class="selected-placeholder">未设置 — 点击地图节点或下方列表</span>
-            </div>
-            <div class="selected-row">
-              <span class="selected-label">终点</span>
-              <div class="end-tags" v-if="endNodeNames.length">
-                <el-tag
-                  v-for="(name, idx) in endNodeNames"
-                  :key="idx"
-                  type="warning"
-                  size="small"
-                  effect="plain"
-                  closable
-                  @close="removeEndNode(nav.endNodeIds.value[idx])"
-                >
-                  {{ name }}
-                </el-tag>
-              </div>
-              <span v-else class="selected-placeholder">未设置 — 点击地图节点或下方列表</span>
-            </div>
-          </div>
-
-          <!------ Node list search (auto-focus) ------>
-          <div class="panel-section" v-if="nodes.length">
-            <el-input
-              v-model="nodeSearch"
-              placeholder="搜索节点名称…"
-              :prefix-icon="Search"
-              clearable
-              size="default"
-              class="node-search-input"
-            />
-          </div>
-
-          <!------ Node list with colored dots & badges ------>
-          <div class="node-list" v-if="nodes.length">
-            <el-scrollbar>
-              <div
-                v-for="node in filteredNodes"
-                :key="node.nodeId"
-                class="node-item"
-                :class="{
-                  'is-start': node.nodeId === nav.startNodeId.value,
-                  'is-end': nav.endNodeIds.value.includes(node.nodeId),
-                }"
-              >
-                <div class="node-info">
-                  <span class="node-dot" :style="{ background: getNodeColor(node) }"></span>
-                  <span class="node-name">{{ node.name }}</span>
-                  <span class="node-id">#{{ node.nodeId }}</span>
-                  <span v-if="getNodeBadge(node)" class="node-badge" :class="{
-                    'badge-start': node.nodeId === nav.startNodeId.value,
-                    'badge-end': nav.endNodeIds.value.includes(node.nodeId) && node.nodeId !== nav.startNodeId.value,
-                  }">
-                    {{ getNodeBadge(node) }}
-                  </span>
-                </div>
-                <div class="node-actions">
-                  <el-button
-                    size="small"
-                    text
-                    type="success"
-                    :disabled="node.nodeId === nav.startNodeId.value"
-                    @click="setAsStart(node)"
-                  >
-                    <el-icon><Location /></el-icon>
-                    起点
-                  </el-button>
-                  <el-button
-                    size="small"
-                    text
-                    type="warning"
-                    :disabled="!isMultiTarget && nav.endNodeIds.value.includes(node.nodeId)"
-                    @click="addAsEnd(node)"
-                  >
-                    <el-icon><Location /></el-icon>
-                    终点
-                  </el-button>
-                </div>
-              </div>
-            </el-scrollbar>
-          </div>
-          <div class="panel-section empty-nodes" v-else>
-            <p class="empty-hint">尚未加载路网节点</p>
-          </div>
-
-          <!------ Plan button ------>
+          <!------ Plan button (always visible, tooltip when disabled) ------>
           <div class="panel-section panel-actions">
             <el-button
               type="primary"
@@ -1113,47 +1325,90 @@ onUnmounted(() => {
               :disabled="!nav.startNodeId.value || !nav.endNodeIds.value.length || !nav.scenicAreaId.value"
               class="plan-btn"
               @click="handlePlanRoute"
+              :title="!nav.startNodeId.value ? '请先设置起点' : !nav.endNodeIds.value.length ? '请先设置终点' : '规划游览路线'"
             >
               规划路线
             </el-button>
           </div>
 
-          <!------ Route info panel (sidebar) ------>
-          <div class="route-info" v-if="isrouteReady">
-            <el-divider />
-            <h4 class="info-title">路线信息</h4>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="info-label">距离</span>
-                <span class="info-value">{{ nav.distanceKm.value || multiRouteDistance }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">预计时间</span>
-                <span class="info-value">{{ nav.estimatedTimeMin.value || multiRouteTime }}</span>
-              </div>
-              <div class="info-item" v-if="nav.multiRoute.value">
-                <span class="info-label">分段数</span>
-                <span class="info-value">{{ routeSegmentsCount }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">策略</span>
-                <span class="info-value strategy-tag">
-                  {{ routeSummaryStrategy }}
-                </span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">方式</span>
-                <span class="info-value">{{ routeSummaryMode }}</span>
-              </div>
+          <!------ Advanced: Node list toggle ------>
+          <div class="panel-section" v-if="nodes.length">
+            <div class="advanced-toggle" @click="showNodeList = !showNodeList">
+              <span>{{ showNodeList ? '▼' : '▶' }} {{ showNodeList ? '隐藏' : '显示' }}路网节点 (高级)</span>
+              <span class="toggle-hint">共 {{ nodes.length }} 个节点</span>
             </div>
           </div>
 
-          <!------ Action buttons ------>
-          <div class="panel-section panel-actions-bottom">
-            <el-button :icon="Close" @click="clearRoute" :disabled="!isrouteReady">
-              清除路线
-            </el-button>
-            <el-button :icon="RefreshRight" @click="resetAll" type="danger" plain>
+          <!------ Node list (hidden by default, wrapped in advanced toggle) ------>
+          <template v-if="showNodeList">
+            <div class="panel-section" v-if="nodes.length">
+              <el-input
+                v-model="nodeSearch"
+                placeholder="搜索节点名称…"
+                :prefix-icon="Search"
+                clearable
+                size="default"
+                class="node-search-input"
+              />
+            </div>
+            <div class="node-list" v-if="nodes.length">
+              <el-scrollbar>
+                <div
+                  v-for="node in filteredNodes"
+                  :key="node.nodeId"
+                  class="node-item"
+                  :class="{
+                    'is-start': node.nodeId === nav.startNodeId.value,
+                    'is-end': nav.endNodeIds.value.includes(node.nodeId),
+                  }"
+                >
+                  <div class="node-info">
+                    <span class="node-dot" :style="{ background: getNodeColor(node) }"></span>
+                    <span v-if="node.nodeId === nav.startNodeId.value" class="node-dot-label" aria-label="起点">起</span>
+                    <span v-else-if="nav.endNodeIds.value.includes(node.nodeId)" class="node-dot-label" aria-label="终点">终</span>
+                    <span class="node-name">{{ node.scenicAreaName || node.name }}</span>
+                    <span v-if="node.scenicAreaName" class="node-scenic-badge">{{ node.scenicAreaName }}</span>
+                    <span v-else class="node-id">#{{ node.nodeId }}</span>
+                    <span v-if="getNodeBadge(node)" class="node-badge" :class="{
+                      'badge-start': node.nodeId === nav.startNodeId.value,
+                      'badge-end': nav.endNodeIds.value.includes(node.nodeId) && node.nodeId !== nav.startNodeId.value,
+                    }">
+                      {{ getNodeBadge(node) }}
+                    </span>
+                  </div>
+                  <div class="node-actions">
+                    <el-button
+                      size="small"
+                      text
+                      type="success"
+                      :disabled="node.nodeId === nav.startNodeId.value"
+                      @click="setAsStart(node)"
+                    >
+                      <el-icon><Location /></el-icon>
+                      起点
+                    </el-button>
+                    <el-button
+                      size="small"
+                      text
+                      type="warning"
+                      :disabled="!isMultiTarget && nav.endNodeIds.value.includes(node.nodeId)"
+                      @click="addAsEnd(node)"
+                    >
+                      <el-icon><Location /></el-icon>
+                      终点
+                    </el-button>
+                  </div>
+                </div>
+              </el-scrollbar>
+            </div>
+            <div class="panel-section empty-nodes" v-else>
+              <p class="empty-hint">尚未加载路网节点</p>
+            </div>
+          </template>
+
+          <!------ Bottom action buttons (only when no route result shown) ------>
+          <div class="panel-section panel-actions-bottom" v-if="!isrouteReady">
+            <el-button :icon="RefreshRight" @click="confirmReset" type="danger" plain>
               重置全部
             </el-button>
           </div>
@@ -1224,7 +1479,7 @@ onUnmounted(() => {
             <el-option
               v-for="node in nodes"
               :key="node.nodeId"
-              :label="node.name + ' (#' + node.nodeId + ')'"
+              :label="(node.scenicAreaName || node.name) + ' (#' + node.nodeId + ')'"
               :value="node.nodeId"
             />
           </el-select>
@@ -1261,7 +1516,7 @@ onUnmounted(() => {
           <el-scrollbar max-height="200px">
             <div v-for="f in nearbyFacilities" :key="f.id" class="facility-item">
               <span class="facility-name">
-                {{ facilityTypeMap[f.type]?.icon || '📍' }} {{ f.name }}
+                <span role="img" :aria-label="facilityTypeMap[f.type]?.ariaLabel || '设施图标'">{{ facilityTypeMap[f.type]?.icon || '📍' }}</span> {{ f.name }}
               </span>
               <span class="facility-dist">{{ f.distance }}m</span>
             </div>
@@ -1315,33 +1570,54 @@ onUnmounted(() => {
         @click="onMapClick"
       />
 
-      <!-- ── Map click context menu ── -->
+      <!-- ── Map click popup — only shows the closest node (multi-node search is transparent for routing) ── -->
+      <Transition name="popup">
+        <div v-if="nearbyClickNodes.length > 0 && nearbyClickPos" class="click-menu"
+             :style="{ left: nearbyClickPos.x + 'px', top: nearbyClickPos.y + 'px' }">
+          <div class="click-menu-header">
+            <strong>{{ nearbyClickNodes[0].label }}</strong>
+            <span class="click-menu-dist">{{ nearbyClickNodes[0].distance }}m</span>
+            <button type="button" class="menu-close" @click="closeMenu">✕</button>
+          </div>
+          <div class="click-menu-actions">
+            <button type="button" class="menu-btn menu-btn-start" @click="setStartFromNearby(nearbyClickNodes[0])">
+              <span>🟢</span> 设为起点
+            </button>
+            <button type="button" class="menu-btn menu-btn-end" @click="setEndFromNearby(nearbyClickNodes[0])">
+              <span>🟠</span> 设为终点
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- ── Legacy marker-click context menu (kept for marker clicks) ── -->
       <Transition name="popup">
         <div v-if="clickMenuNode && clickMenuPos" class="click-menu" :style="{ left: clickMenuPos.x + 'px', top: clickMenuPos.y + 'px' }">
           <div class="click-menu-header">
-            <strong>{{ clickMenuNode.name }}</strong>
+            <strong>{{ clickMenuNode.scenicAreaName || clickMenuNode.name }}</strong>
             <span class="click-menu-dist">{{ clickMenuDistance }}m</span>
           </div>
           <div class="click-menu-actions">
-            <button class="menu-btn menu-btn-start" @click="menuSetStart">
+            <button type="button" class="menu-btn menu-btn-start" @click="menuSetStart">
               <span>🟢</span> 设为起点
             </button>
-            <button class="menu-btn menu-btn-end" @click="menuSetEnd">
+            <button type="button" class="menu-btn menu-btn-end" @click="menuSetEnd">
               <span>🟠</span> 设为终点
             </button>
-            <button class="menu-btn menu-btn-waypoint" @click="menuAddWaypoint">
+            <button type="button" class="menu-btn menu-btn-waypoint" @click="menuAddWaypoint">
               <span>⚪</span> {{ isMultiTarget ? '加入路径(下一站)' : '加入路径' }}
             </button>
-            <button class="menu-btn menu-btn-focus" @click="menuFocusNode">
+            <button type="button" class="menu-btn menu-btn-focus" @click="menuFocusNode">
               <span>📍</span> 地图聚焦
             </button>
           </div>
-          <button class="menu-close" @click="closeMenu">✕</button>
+          <button type="button" class="menu-close" @click="closeMenu">✕</button>
         </div>
       </Transition>
 
       <!-- Panel toggle button (mobile) -->
       <button
+        type="button"
         v-if="isMobile"
         class="panel-toggle-btn"
         :class="{ collapsed: panelCollapsed }"
@@ -1362,19 +1638,21 @@ onUnmounted(() => {
       </div>
 
       <!-- ── Marker click popup ── -->
-      <Transition name="popup-fade">
+      <Transition name="shared-fade">
         <div
           v-if="popupNode && popupPixel"
           class="marker-popup"
           :style="{ left: popupPixel.x + 'px', top: popupPixel.y + 'px' }"
         >
           <div class="popup-header">
-            <span class="popup-name">{{ popupNode.name }}</span>
-            <span class="popup-id">#{{ popupNode.nodeId }}</span>
-            <button class="popup-close" @click="closePopup">×</button>
+            <span class="popup-name">{{ popupNode.scenicAreaName || popupNode.name }}</span>
+            <span v-if="popupNode.scenicAreaName" class="node-scenic-badge">{{ popupNode.scenicAreaName }}</span>
+            <span v-else class="popup-id">#{{ popupNode.nodeId }}</span>
+            <button type="button" class="popup-close" @click="closePopup">×</button>
           </div>
           <div class="popup-actions">
             <button
+              type="button"
               class="popup-btn popup-btn-start"
               :disabled="popupNode.nodeId === nav.startNodeId.value"
               @click="setStartFromPopup"
@@ -1383,11 +1661,12 @@ onUnmounted(() => {
               设为起点
             </button>
             <button
+              type="button"
               class="popup-btn popup-btn-end"
               :disabled="nav.endNodeIds.value.includes(popupNode.nodeId) && !isMultiTarget"
               @click="setEndFromPopup"
             >
-              <span class="popup-dot" style="background:#FF6B35"></span>
+              <span class="popup-dot" style="background:var(--el-color-primary)"></span>
               设为终点
             </button>
           </div>
@@ -1396,7 +1675,7 @@ onUnmounted(() => {
       </Transition>
 
       <!-- ── Route info overlay on map ── -->
-      <Transition name="overlay-fade">
+      <Transition name="shared-fade">
         <div v-if="isrouteReady" class="route-overlay-card">
           <div class="overlay-icon">{{ routeSummaryMode === '步行' ? '🚶' : routeSummaryMode === '骑行' ? '🚲' : '🚍' }}</div>
           <div class="overlay-info">
@@ -1417,26 +1696,26 @@ onUnmounted(() => {
       </Transition>
 
       <!-- ── Collapsed mini-control (mobile, when panel hidden) ── -->
-      <Transition name="overlay-fade">
+      <Transition name="shared-fade">
         <div v-if="isMobile && panelCollapsed && isrouteReady" class="mini-control">
           <div class="mini-info">
             <span>{{ routeSummaryMode === '步行' ? '🚶' : routeSummaryMode === '骑行' ? '🚲' : '🚍' }}</span>
             <span>{{ routeSummaryTime }} · {{ routeSummaryDistance }}</span>
           </div>
-          <button class="mini-expand" @click="panelCollapsed = false">展开面板 ▲</button>
+          <button type="button" class="mini-expand" @click="panelCollapsed = false">展开面板 ▲</button>
         </div>
       </Transition>
 
       <!-- ── Mobile FAB (floating action button) ── -->
       <div v-if="isMobile && nodes.length" class="mobile-fab-container">
-        <Transition name="fab-actions-fade">
+        <Transition name="shared-fade">
           <div v-if="fabExpanded" class="fab-actions">
-            <button class="fab-action fab-action-plan" @click="fabPlanRoute">规划</button>
-            <button class="fab-action fab-action-clear" @click="fabClearRoute">清除</button>
-            <button class="fab-action fab-action-reset" @click="fabReset">重置</button>
+            <button type="button" class="fab-action fab-action-plan" @click="fabPlanRoute">规划</button>
+            <button type="button" class="fab-action fab-action-clear" @click="fabClearRoute">清除</button>
+            <button type="button" class="fab-action fab-action-reset" @click="fabReset">重置</button>
           </div>
         </Transition>
-        <button class="fab-btn" @click="toggleFab" :class="{ active: fabExpanded }">
+        <button type="button" class="fab-btn" @click="toggleFab" :class="{ active: fabExpanded }">
           <span v-if="!fabExpanded">
             <template v-if="isrouteReady">{{ routeSummaryTime || '路线' }}</template>
             <template v-else>＋</template>
@@ -1543,16 +1822,6 @@ onUnmounted(() => {
   width: 100%;
 }
 
-.welcome-search-row {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
-.welcome-search-row .scenic-input {
-  flex: 1;
-}
-
 .welcome-hint {
   font-size: 11px;
   color: var(--el-text-color-placeholder, #c0c4cc);
@@ -1560,8 +1829,37 @@ onUnmounted(() => {
 }
 
 .session-hint {
-  color: var(--el-color-primary, #FF6B35);
+  color: var(--el-color-primary);
   font-weight: 500;
+}
+
+/* ── Example chips (welcome card) ── */
+.example-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.example-chip {
+  font-size: 12px;
+  color: var(--el-color-primary);
+  background: rgba(64, 158, 255, 0.08);
+  padding: 4px 14px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+  user-select: none;
+}
+
+.example-chip:hover {
+  background: rgba(64, 158, 255, 0.18);
+  transform: scale(1.04);
+}
+
+.example-chip:active {
+  transform: scale(0.96);
 }
 
 /* ═══════════════════════════════════════════════
@@ -1605,21 +1903,41 @@ onUnmounted(() => {
   margin-bottom: 6px;
 }
 
-.load-row {
-  display: flex;
-  gap: 8px;
-}
-
-.scenic-input {
-  flex: 1;
-}
-
 .scenic-search-input {
   width: 100%;
 }
 
+.scenic-switch-input {
+  width: 140px;
+  flex-shrink: 0;
+}
+
 .full-width {
   width: 100%;
+}
+
+/* ── Current scenic area info bar ── */
+.current-scenic-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+  flex-wrap: wrap;
+}
+
+.current-scenic-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary, #2c3e50);
+  white-space: nowrap;
+}
+
+.current-scenic-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #7f8c8d);
+  white-space: nowrap;
+  margin-right: auto;
 }
 
 .toggle-row {
@@ -1661,6 +1979,198 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* ═══════════════════════════════════════════════
+   FROM→TO SELECTION CARDS
+   ═══════════════════════════════════════════════ */
+.fromto-section {
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fromto-card {
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+
+.fromto-card.start-card {
+  border-left: 3px solid var(--el-color-success, #67C23A);
+}
+
+.fromto-card.end-card {
+  border-left: 3px solid var(--el-color-primary);
+}
+
+.fromto-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary, #7f8c8d);
+  margin-bottom: 4px;
+}
+
+.fromto-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fromto-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary, #2c3e50);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.fromto-clear {
+  flex-shrink: 0;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  font-size: 14px;
+}
+
+.fromto-card .el-autocomplete {
+  width: 100%;
+}
+
+.fromto-swap {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+  transition: opacity 0.2s;
+}
+
+.fromto-swap:hover {
+  opacity: 0.7;
+}
+
+.extra-ends {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.extra-end-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  background: rgba(64, 158, 255, 0.08);
+  color: var(--el-color-primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* ═══════════════════════════════════════════════
+   ROUTE RESULT CARD (prominent, after planning)
+   ═══════════════════════════════════════════════ */
+.route-result-card {
+  margin: 4px 16px 8px;
+  border: 1px solid var(--el-color-success, #67C23A);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(103, 194, 58, 0.04);
+}
+
+.route-result-header {
+  background: var(--el-color-success, #67C23A);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+}
+
+.route-result-body {
+  padding: 10px 14px 12px;
+}
+
+.route-result-path {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary, #2c3e50);
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.route-result-stat {
+  flex: 1;
+  min-width: 60px;
+}
+
+.stat-label {
+  display: block;
+  font-size: 10px;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  margin-bottom: 1px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+}
+
+.stat-tag {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: var(--el-text-color-secondary, #7f8c8d) !important;
+}
+
+.route-result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.route-result-actions .el-button {
+  font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════
+   ADVANCED TOGGLE (show/hide node list)
+   ═══════════════════════════════════════════════ */
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.2s;
+  border-top: 1px solid var(--el-border-color-lighter, #ebeef5);
+}
+
+.advanced-toggle:hover {
+  opacity: 0.7;
+}
+
+.toggle-hint {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  font-weight: 400;
 }
 
 /* ═══════════════════════════════════════════════
@@ -1712,6 +2222,14 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.node-dot-label {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary, #909399);
+}
+
 .node-name {
   font-size: 13px;
   font-weight: 500;
@@ -1728,6 +2246,20 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.node-scenic-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0D9488;
+  background: rgba(13, 148, 136, 0.1);
+  padding: 1px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .node-badge {
   font-size: 10px;
   padding: 1px 6px;
@@ -1739,12 +2271,12 @@ onUnmounted(() => {
 
 .badge-start {
   background: rgba(103, 194, 58, 0.15);
-  color: #67C23A;
+  color: var(--el-color-success);
 }
 
 .badge-end {
   background: rgba(255, 107, 53, 0.15);
-  color: #FF6B35;
+  color: var(--el-color-primary);
 }
 
 .node-actions {
@@ -1895,7 +2427,7 @@ onUnmounted(() => {
   display: block;
   font-size: 15px;
   font-weight: 700;
-  color: var(--el-color-primary, #ff6b35);
+  color: var(--el-color-primary);
 }
 
 .strategy-tag {
@@ -2013,7 +2545,7 @@ onUnmounted(() => {
 .facility-dist {
   font-size: 12px;
   font-weight: 600;
-  color: var(--el-color-primary, #ff6b35);
+  color: var(--el-color-primary);
   flex-shrink: 0;
   margin-left: 8px;
 }
@@ -2046,7 +2578,7 @@ onUnmounted(() => {
 }
 
 .spot-rating {
-  color: #f39c12;
+  color: var(--el-color-warning);
   font-weight: 600;
 }
 
@@ -2202,12 +2734,12 @@ onUnmounted(() => {
 
 .popup-btn-start:hover:not(:disabled) {
   background: rgba(103, 194, 58, 0.08);
-  border-color: #67C23A;
+  border-color: var(--el-color-success);
 }
 
 .popup-btn-end:hover:not(:disabled) {
   background: rgba(255, 107, 53, 0.08);
-  border-color: #FF6B35;
+  border-color: var(--el-color-primary);
 }
 
 .popup-dot {
@@ -2230,23 +2762,18 @@ onUnmounted(() => {
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
-/* popup transitions */
-.popup-fade-enter-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+/* shared fade transition */
+.shared-fade-enter-active,
+.shared-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
-
-.popup-fade-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.popup-fade-enter-from {
+.shared-fade-enter-from {
   opacity: 0;
-  transform: translate(-50%, calc(-100% - 4px));
+  transform: translateY(-8px);
 }
-
-.popup-fade-leave-to {
+.shared-fade-leave-to {
   opacity: 0;
-  transform: translate(-50%, calc(-100% - 24px));
+  transform: translateY(-8px);
 }
 
 /* ═══════════════════════════════════════════════
@@ -2299,7 +2826,7 @@ onUnmounted(() => {
 
 .overlay-value {
   font-weight: 700;
-  color: var(--el-color-primary, #FF6B35);
+  color: var(--el-color-primary);
 }
 
 .overlay-strategy {
@@ -2308,24 +2835,6 @@ onUnmounted(() => {
   margin-top: 1px;
 }
 
-/* overlay transitions */
-.overlay-fade-enter-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-.overlay-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.overlay-fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
-.overlay-fade-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
-}
 
 /* ═══════════════════════════════════════════════
    MINI-CONTROL (collapsed panel, mobile)
@@ -2360,7 +2869,7 @@ onUnmounted(() => {
 
 .mini-expand {
   border: none;
-  background: var(--el-color-primary, #FF6B35);
+  background: var(--el-color-primary);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -2413,7 +2922,7 @@ onUnmounted(() => {
 }
 
 .fab-action-plan {
-  background: var(--el-color-primary, #FF6B35);
+  background: var(--el-color-primary);
   color: #fff;
 }
 
@@ -2434,7 +2943,7 @@ onUnmounted(() => {
   height: 52px;
   border-radius: 50%;
   border: none;
-  background: var(--el-color-primary, #FF6B35);
+  background: var(--el-color-primary);
   color: #fff;
   font-size: 14px;
   font-weight: 700;
@@ -2455,23 +2964,7 @@ onUnmounted(() => {
   transform: rotate(45deg);
 }
 
-.fab-actions-fade-enter-active {
-  transition: all 0.25s ease;
-}
 
-.fab-actions-fade-leave-active {
-  transition: all 0.2s ease;
-}
-
-.fab-actions-fade-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-.fab-actions-fade-leave-to {
-  opacity: 0;
-  transform: translateY(6px);
-}
 
 /* ═══════════════════════════════════════════════
    EMPTY STATE
@@ -2518,6 +3011,116 @@ onUnmounted(() => {
   color: var(--el-text-color-secondary, #909399);
 }
 
+/* ── Multi-node click menu ── */
+.click-menu-multi {
+  min-width: 220px;
+  max-width: 280px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+}
+
+.click-menu-multi .click-menu-header {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary, #303133);
+}
+
+.click-menu-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+}
+
+.click-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px dashed var(--el-border-color-lighter, #ebeef5);
+  transition: background 0.15s;
+}
+
+.click-menu-item:last-child {
+  border-bottom: none;
+}
+
+.click-menu-item:hover {
+  background: var(--el-fill-color-light, #f5f7fa);
+}
+
+.cmi-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cmi-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary, #303133);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.cmi-label.is-scenic {
+  color: #00897B;
+}
+
+.cmi-label.is-poi {
+  color: #388E3C;
+}
+
+.cmi-distance {
+  font-size: 11px;
+  color: var(--el-text-color-secondary, #909399);
+  flex-shrink: 0;
+}
+
+.cmi-type {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--el-fill-color-lighter, #f0f2f5);
+  color: var(--el-text-color-secondary, #909399);
+  flex-shrink: 0;
+}
+
+.cmi-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.cmi-actions .menu-btn {
+  font-size: 14px;
+  padding: 2px 4px;
+  min-width: 24px;
+  justify-content: center;
+}
+
+.click-menu-multi .menu-close {
+  position: static;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.click-menu-header .menu-close {
+  position: static;
+}
+/* ── end multi-node ── */
+
 .click-menu-actions {
   display: flex;
   flex-direction: column;
@@ -2547,7 +3150,7 @@ onUnmounted(() => {
 }
 
 .menu-btn-end {
-  color: var(--el-color-primary, #FF6B35);
+  color: var(--el-color-primary);
 }
 
 .menu-btn-waypoint {

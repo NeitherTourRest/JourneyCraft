@@ -79,7 +79,6 @@ const menuItems = [
     <div class="sidebar-inner">
       <div class="sidebar-logo">
         <span v-if="!menuCollapsed" class="logo-text">JourneyCraft</span>
-        <span v-else class="logo-icon">JC</span>
       </div>
 
       <el-menu
@@ -99,7 +98,7 @@ const menuItems = [
       </el-menu>
 
       <div class="sidebar-collapse-btn" @click="emit('toggle')">
-        <el-icon :size="18">
+        <el-icon :size="18" :class="{ 'is-rotated': collapsed && !isMobile }">
           <Fold v-if="!collapsed || isMobile" />
           <Expand v-else />
         </el-icon>
@@ -108,7 +107,7 @@ const menuItems = [
   </aside>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .app-sidebar {
   --sidebar-width: 240px;
   --sidebar-collapsed-width: 64px;
@@ -119,9 +118,9 @@ const menuItems = [
   position: sticky;
   top: 0;
   left: 0;
-  background: var(--el-menu-bg-color, #fff);
-  border-right: 1px solid var(--el-border-color-light, #e4e7ed);
-  transition: width 0.3s ease;
+  background: #f5f0e8;
+  border-right: 2px dashed #2c2c2c;
+  transition: width 0.15s ease;
   overflow: hidden;
   z-index: 100;
 }
@@ -137,22 +136,17 @@ const menuItems = [
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-bottom: 2px dashed #2c2c2c;
   flex-shrink: 0;
+  transition: border-color 0.15s ease;
 }
 
 .logo-text {
   font-size: 20px;
   font-weight: 700;
-  color: var(--el-color-primary, #409eff);
+  color: #2c2c2c;
   letter-spacing: 1px;
   white-space: nowrap;
-}
-
-.logo-icon {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--el-color-primary, #409eff);
 }
 
 .sidebar-menu {
@@ -160,6 +154,49 @@ const menuItems = [
   overflow-y: auto;
   overflow-x: hidden;
   border-right: none !important;
+  padding: 4px 0;
+
+  :deep(.el-menu) {
+    background-color: transparent;
+    border-right: none;
+  }
+
+  :deep(.el-menu-item) {
+    margin: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    position: relative;
+    color: #2c2c2c;
+    background-color: transparent;
+
+    &:hover {
+      background-color: #e8e2d8;
+    }
+
+    &.is-active {
+      background-color: #e8e2d8;
+      color: #2c2c2c;
+
+      &::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 4px;
+        bottom: 4px;
+        width: 0;
+        border-right: 3px dashed #2c2c2c;
+      }
+    }
+  }
+
+  :deep(.el-sub-menu__title) {
+    color: #2c2c2c;
+    background-color: transparent;
+
+    &:hover {
+      background-color: #e8e2d8;
+    }
+  }
 }
 
 .sidebar-collapse-btn {
@@ -167,16 +204,24 @@ const menuItems = [
   display: flex;
   align-items: center;
   justify-content: center;
-  border-top: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-top: 2px dashed #2c2c2c;
   cursor: pointer;
-  color: var(--el-text-color-regular, #606266);
-  transition: background-color 0.2s, color 0.2s;
+  color: #2c2c2c;
+  transition: background-color 0.15s, color 0.15s;
   flex-shrink: 0;
 }
 
 .sidebar-collapse-btn:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
-  color: var(--el-color-primary, #409eff);
+  background: #e8e2d8;
+  color: #2c2c2c;
+}
+
+.sidebar-collapse-btn .el-icon {
+  transition: transform 0.15s ease;
+}
+
+.sidebar-collapse-btn .el-icon.is-rotated {
+  transform: rotate(180deg);
 }
 
 .sidebar-backdrop {
@@ -204,7 +249,7 @@ const menuItems = [
     z-index: 2000;
     transform: translateX(-100%);
     width: var(--sidebar-width);
-    transition: transform 0.3s ease;
+    transition: transform 0.15s ease;
   }
 
   .app-sidebar.is-mobile-visible {
@@ -217,7 +262,7 @@ const menuItems = [
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: -1;
-    animation: fade-in 0.3s ease;
+    animation: fade-in 0.15s ease;
   }
 }
 

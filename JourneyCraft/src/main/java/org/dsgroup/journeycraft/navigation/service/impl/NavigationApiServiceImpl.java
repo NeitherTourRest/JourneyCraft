@@ -286,6 +286,11 @@ public class NavigationApiServiceImpl implements NavigationService {
         dto.setLongitude(node.getLongitude());
         dto.setAction(node.getAction());
         dto.setArrivalTime(node.getArrivalTime());
+        dto.setIsPrimary(node.getIsPrimary());
+        dto.setIsEntryNode(node.getIsEntryNode());
+        dto.setIsExitNode(node.getIsExitNode());
+        dto.setScenicAreaId(node.getScenicAreaId());
+        dto.setScenicAreaName(node.getScenicAreaName());
         return dto;
     }
 

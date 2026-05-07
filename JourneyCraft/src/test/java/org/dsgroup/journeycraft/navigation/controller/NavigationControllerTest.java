@@ -84,7 +84,7 @@ class NavigationControllerTest {
             .thenReturn(mockResult);
 
         Response<?> response = navigationController.calculateRoute(
-                1L, 1L, 5L, "shortest_distance", "walk", "dijkstra");
+                1L, 1L, 5L, "shortest_distance", "walk", "dijkstra", null);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -101,7 +101,7 @@ class NavigationControllerTest {
             .thenReturn(mockResult);
 
         Response<?> response = navigationController.calculateRoute(
-                1L, 1L, 5L, "shortest_distance", "walk", "astar");
+                1L, 1L, 5L, "shortest_distance", "walk", "astar", null);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -120,7 +120,7 @@ class NavigationControllerTest {
             .thenReturn(mockResult);
 
         Response<?> response = navigationController.calculateRoute(
-                1L, 1L, 10L, "shortest_time", "walk", "dijkstra");
+                1L, 1L, 10L, "shortest_time", "walk", "dijkstra", null);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -138,7 +138,7 @@ class NavigationControllerTest {
             .thenReturn(mockResult);
 
         Response<?> response = navigationController.calculateRoute(
-                1L, 1L, 5L, "avoid_crowd", "walk", "dijkstra");
+                1L, 1L, 5L, "avoid_crowd", "walk", "dijkstra", null);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());
@@ -154,7 +154,7 @@ class NavigationControllerTest {
             .thenReturn(null);
 
         Response<?> response = navigationController.calculateRoute(
-                1L, 1L, 999L, "shortest_distance", "walk", "dijkstra");
+                1L, 1L, 999L, "shortest_distance", "walk", "dijkstra", null);
 
         assertNotNull(response);
         assertFalse(response.isSuccess());
@@ -174,7 +174,7 @@ class NavigationControllerTest {
             .thenReturn(bikeResult);
 
         Response<?> response = navigationController.calculateRoute(
-                1L, 1L, 5L, "shortest_distance", "bike", "dijkstra");
+                1L, 1L, 5L, "shortest_distance", "bike", "dijkstra", null);
 
         assertNotNull(response);
         assertTrue(response.isSuccess());

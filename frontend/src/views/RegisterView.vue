@@ -80,7 +80,7 @@ function goToLogin() {
     <el-card class="auth-card" shadow="always">
       <div class="auth-header">
         <h1 class="auth-title">JourneyCraft</h1>
-        <p class="auth-subtitle">创建新账号</p>
+        <p class="auth-subtitle">注册</p>
       </div>
 
       <el-form
@@ -171,21 +171,41 @@ function goToLogin() {
 </template>
 
 <style scoped>
+/* ── Page Container ── */
 .auth-page {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
   padding: 16px;
-  background-color: var(--el-bg-color-page, #f5f7fa);
+  background: #f5f0e8;
 }
 
+/* ── Auth Card ── */
 .auth-card {
   width: 100%;
-  max-width: 400px;
-  border-radius: 12px;
+  max-width: 480px;
+  border-radius: 4px;
+  border: 2px dashed #2c2c2c;
+  border-top: 4px solid #2c2c2c;
+  background: #faf5ed;
+  box-shadow: 2px 2px 0px rgba(44,44,44,0.3);
+  overflow: hidden;
+  animation: authCardFadeIn 0.15s ease;
 }
 
+@keyframes authCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Header ── */
 .auth-header {
   text-align: center;
   margin-bottom: 32px;
@@ -194,16 +214,20 @@ function goToLogin() {
 .auth-title {
   font-size: 28px;
   font-weight: 700;
-  color: var(--el-color-primary);
+  color: #2c2c2c;
   margin: 0 0 8px;
+  letter-spacing: 1px;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
 .auth-subtitle {
   font-size: 14px;
-  color: var(--el-text-color-secondary);
+  color: #2c2c2c;
+  opacity: 0.7;
   margin: 0;
 }
 
+/* ── Form ── */
 .auth-form {
   margin-bottom: 16px;
 }
@@ -212,9 +236,31 @@ function goToLogin() {
   width: 100%;
 }
 
+/* ── Footer ── */
 .auth-footer {
   text-align: center;
   font-size: 14px;
-  color: var(--el-text-color-secondary);
+  color: #2c2c2c;
+  opacity: 0.7;
+}
+
+.auth-footer .el-link {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.auth-footer .el-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .auth-card {
+    max-width: 100%;
+  }
+
+  .auth-title {
+    font-size: 24px;
+  }
 }
 </style>

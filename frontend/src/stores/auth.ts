@@ -1,26 +1,27 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import type { UserBrief } from '@/types/auth'
+import { ref } from 'vue'
 import { request } from '@/api/request'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(null)
-  const refreshToken = ref<string | null>(null)
-  const user = ref<UserBrief | null>(null)
+  const userId = ref<number | null>(null)
+  const username = ref<string | null>(null)
+  const nickname = ref<string | null>(null)
 
-  const isAuthenticated = computed(() => !!token.value)
+  const isAuthenticated = ref(false)
 
-  function setAuth(data: { token: string; refreshToken: string; user: UserBrief }) {
-    token.value = data.token
-    refreshToken.value = data.refreshToken
-    user.value = data.user
+  function setAuth(data: { userId: number; username: string; nickname: string; avatarUrl?: string }) {
+    userId.value = data.userId
+    username.value = data.username
+    nickname.value = data.nickname
+    isAuthenticated.value = true
     persistToStorage()
   }
 
   function clearAuth() {
-    token.value = null
-    refreshToken.value = null
-    user.value = null
+    userId.value = null
+    username.value = null
+    nickname.value = null
+    isAuthenticated.value = false
     clearStorage()
   }
 
@@ -29,9 +30,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   function persistToStorage() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      token: token.value,
-      refreshToken: refreshToken.value,
-      user: user.value,
+      userId: userId.value,
+      username: username.value,
+      nickname: nickname.value,
     }))
   }
 
@@ -41,37 +42,29 @@ export const useAuthStore = defineStore('auth', () => {
 
   // ── Auth operations ──
 
-  async function login(username: string, password: string) {
-    const res = await request.post<{ token: string; refreshToken: string; expiresIn: number; user: UserBrief }>(
+  async function login(loginUsername: string, password: string) {
+    const res = await request.post<{ userId: number; username: string; nickname: string; avatarUrl: string }>(
       '/api/auth/login',
-      { username, password },
+      { username: loginUsername, password },
     )
     if (res.data.code !== 200) throw new Error(res.data.message || 'Login failed')
+    const d = res.data.data
     setAuth({
-      token: res.data.data.token,
-      refreshToken: res.data.data.refreshToken,
-      user: res.data.data.user,
+      userId: d.userId,
+      username: d.username,
+      nickname: d.nickname,
+      avatarUrl: d.avatarUrl,
     })
-    persistToStorage()
   }
 
   async function logout() {
     try {
       await request.post('/api/auth/logout')
     } catch {
-      // Fire-and-forget: server may be down, still clear local state
+      // Fire-and-forget
     }
     clearAuth()
-    clearStorage()
     window.location.hash = '/login'
-  }
-
-  async function refresh() {
-    if (!refreshToken.value) throw new Error('No refresh token')
-    const res = await request.post<{ token: string }>('/api/auth/refresh', { refreshToken: refreshToken.value })
-    if (res.data.code !== 200) throw new Error(res.data.message || 'Refresh failed')
-    token.value = res.data.data.token
-    persistToStorage()
   }
 
   function getStoredAuth(): boolean {
@@ -79,10 +72,11 @@ export const useAuthStore = defineStore('auth', () => {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (!stored) return false
       const data = JSON.parse(stored)
-      if (!data.token || typeof data.token !== 'string') return false
-      token.value = data.token
-      refreshToken.value = data.refreshToken || null
-      user.value = data.user || null
+      if (!data.userId || typeof data.userId !== 'number') return false
+      userId.value = data.userId
+      username.value = data.username || null
+      nickname.value = data.nickname || null
+      isAuthenticated.value = true
       return true
     } catch {
       clearStorage()
@@ -91,15 +85,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return {
-    token,
-    refreshToken,
-    user,
+    userId,
+    username,
+    nickname,
     isAuthenticated,
     setAuth,
     clearAuth,
     login,
     logout,
-    refresh,
     getStoredAuth,
   }
 })

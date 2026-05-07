@@ -117,6 +117,18 @@ public class RoadNode implements Serializable {
     private Boolean enabled;
 
     /**
+     * 是否景区代表节点。
+     * 该节点推荐作为地图显示标记，POI 类型优先选择。
+     * 每个景区有且只有一个 isPrimary=true 的节点。
+     */
+    @TableField("`is_primary`")
+    private Boolean isPrimary;
+
+    /** 景区名称（瞬态字段，不映射数据库 — 由业务层填充） */
+    @TableField(exist = false)
+    private String scenicAreaName;
+
+    /**
      * 是否删除（逻辑删除字段）
      * 0=否, 1=是
      * 

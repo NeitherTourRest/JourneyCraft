@@ -46,6 +46,38 @@ public interface PathPlanningService {
                                           Integer transportMode, String strategy);
 
     /**
+     * 景区多入口路径规划
+     * <p>
+     * 自动查找景区关联的所有路网入口节点，运行一次 Dijkstra 即可找到
+     * 从用户位置到景区的最近入口路径。比逐入口分别调用 Dijkstra 更高效。
+     *
+     * @param scenicAreaId 目标景区ID
+     * @param startNodeId  起点节点ID
+     * @param transportMode 交通方式
+     * @param strategy     规划策略
+     * @return 路径规划结果，附带命中的入口节点ID
+     */
+    PathPlanningResult calculateShortestPathToScenic(Long scenicAreaId, Long startNodeId,
+                                                     Integer transportMode, String strategy);
+
+    /**
+     * 景区间路径规划（多源起点→多目标终点）
+     * <p>
+     * 将起点景区和终点景区的所有路网节点分别作为候选起点集和候选终点集，
+     * 运行一次多源 Dijkstra，从所有起点同时出发，在命中任意终点时停止。
+     * 比逐节点调用 Dijkstra 更高效（一次遍历 vs N×M 次遍历）。
+     *
+     * @param startScenicAreaId 起点景区ID
+     * @param endScenicAreaId   终点景区ID
+     * @param transportMode     交通方式
+     * @param strategy          规划策略
+     * @return 路径规划结果，附带命中的起点/终点节点ID
+     */
+    PathPlanningResult calculateShortestPathBetweenScenicAreas(
+        Long startScenicAreaId, Long endScenicAreaId,
+        Integer transportMode, String strategy);
+
+    /**
      * 多目标路线规划（TSP变种算法）
      * <p>
      * 计算从起点出发，访问所有目标节点的最优路线
@@ -182,6 +214,18 @@ public interface PathPlanningService {
         private String action;
         /** 到达时间 */
         private String arrivalTime;
+        /** 是否景区代表节点（用于前端地图标记突出显示） */
+        private Boolean isPrimary;
+
+        /** 是否为目标景区的入口节点（景区间导航时使用） */
+        private Boolean isEntryNode;
+        /** 是否为起点景区的出口节点（景区间导航时使用） */
+        private Boolean isExitNode;
+
+        /** 所属景区ID（用于前端景区级导航） */
+        private Long scenicAreaId;
+        /** 所属景区名称（用于前端显示） */
+        private String scenicAreaName;
 
         // getters and setters
         public Long getNodeId() { return nodeId; }
@@ -198,5 +242,15 @@ public interface PathPlanningService {
         public void setAction(String action) { this.action = action; }
         public String getArrivalTime() { return arrivalTime; }
         public void setArrivalTime(String arrivalTime) { this.arrivalTime = arrivalTime; }
+        public Boolean getIsPrimary() { return isPrimary; }
+        public void setIsPrimary(Boolean isPrimary) { this.isPrimary = isPrimary; }
+        public Boolean getIsEntryNode() { return isEntryNode; }
+        public void setIsEntryNode(Boolean isEntryNode) { this.isEntryNode = isEntryNode; }
+        public Boolean getIsExitNode() { return isExitNode; }
+        public void setIsExitNode(Boolean isExitNode) { this.isExitNode = isExitNode; }
+        public Long getScenicAreaId() { return scenicAreaId; }
+        public void setScenicAreaId(Long scenicAreaId) { this.scenicAreaId = scenicAreaId; }
+        public String getScenicAreaName() { return scenicAreaName; }
+        public void setScenicAreaName(String scenicAreaName) { this.scenicAreaName = scenicAreaName; }
     }
 }

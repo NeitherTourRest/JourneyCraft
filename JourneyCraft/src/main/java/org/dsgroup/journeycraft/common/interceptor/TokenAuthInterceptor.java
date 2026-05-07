@@ -9,15 +9,14 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
  * Token 校验拦截器。
+ * 在请求进入控制器前校验 Authorization 头中的 Bearer token，
+ * 将解析出的 userId 存入 request 属性供后续使用。
  */
 @RequiredArgsConstructor
 public class TokenAuthInterceptor implements HandlerInterceptor {
 
     private final TokenSessionStore tokenSessionStore;
 
-    /**
-     * 在请求进入控制器前校验 Token。
-     */
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request,
                              @NonNull HttpServletResponse response,

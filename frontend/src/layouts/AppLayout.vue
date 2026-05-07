@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
+import MobileNav from './MobileNav.vue'
 
 const sidebarCollapsed = ref(false)
 const mobileSidebarVisible = ref(false)
@@ -49,8 +50,11 @@ onUnmounted(() => {
     <el-container class="app-main-container">
       <AppHeader @toggle-sidebar="toggleSidebar" />
       <el-main class="app-main">
-        <router-view />
+        <transition name="fade-slide" mode="out-in">
+          <router-view />
+        </transition>
       </el-main>
+      <MobileNav />
     </el-container>
   </el-container>
 </template>
@@ -59,6 +63,7 @@ onUnmounted(() => {
 .app-layout {
   display: flex;
   min-height: 100vh;
+  transition: background-color 0.15s ease;
 }
 
 .app-main-container {
@@ -71,7 +76,29 @@ onUnmounted(() => {
 .app-main {
   flex: 1;
   overflow: auto;
-  padding: 20px;
-  background: var(--el-bg-color-page, #f2f3f5);
+  padding: 0;
+  background: #f5f0e8;
+}
+
+@media (max-width: 767px) {
+  .app-main {
+    padding-bottom: 72px;
+  }
+}
+
+/* fade-slide transition */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
 }
 </style>

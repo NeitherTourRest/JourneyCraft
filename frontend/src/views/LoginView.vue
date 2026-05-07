@@ -55,7 +55,7 @@ function goToRegister() {
     <el-card class="auth-card" shadow="always">
       <div class="auth-header">
         <h1 class="auth-title">JourneyCraft</h1>
-        <p class="auth-subtitle">登录你的账号</p>
+        <p class="auth-subtitle">登录</p>
       </div>
 
       <el-form
@@ -114,12 +114,30 @@ function goToRegister() {
   justify-content: center;
   min-height: 100%;
   padding: 16px;
+  background: #f5f0e8;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
-  border-radius: 12px;
+  max-width: 420px;
+  position: relative;
+  overflow: hidden;
+  --el-card-border-radius: 4px;
+  background: #faf5ed;
+  border: 2px dashed #2c2c2c;
+  box-shadow: 2px 2px 0px rgba(44,44,44,0.3);
+  animation: auth-fade-in 0.15s ease-out;
+}
+
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #2c2c2c;
+  z-index: 1;
 }
 
 .auth-header {
@@ -130,13 +148,15 @@ function goToRegister() {
 .auth-title {
   font-size: 28px;
   font-weight: 700;
-  color: var(--el-color-primary);
+  color: #2c2c2c;
   margin: 0 0 8px;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
 .auth-subtitle {
   font-size: 14px;
-  color: var(--el-text-color-secondary);
+  color: #2c2c2c;
+  opacity: 0.7;
   margin: 0;
 }
 
@@ -151,7 +171,23 @@ function goToRegister() {
 .auth-footer {
   text-align: center;
   font-size: 14px;
-  color: var(--el-text-color-secondary);
+  color: #2c2c2c;
+  opacity: 0.7;
+}
+
+.auth-footer .el-link:hover {
+  text-decoration: underline;
+}
+
+@keyframes auth-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 768px) {

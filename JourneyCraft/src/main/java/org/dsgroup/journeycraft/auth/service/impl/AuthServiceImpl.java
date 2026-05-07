@@ -5,15 +5,12 @@ import org.dsgroup.journeycraft.auth.vo.reqvo.LoginReqVO;
 import org.dsgroup.journeycraft.auth.vo.reqvo.RefreshTokenReqVO;
 import org.dsgroup.journeycraft.auth.vo.reqvo.RegisterReqVO;
 import org.dsgroup.journeycraft.auth.vo.rspvo.AuthLoginRspVO;
-import org.dsgroup.journeycraft.auth.vo.rspvo.AuthUserRspVO;
 import org.dsgroup.journeycraft.auth.vo.rspvo.RegisterRspVO;
-import org.dsgroup.journeycraft.common.utils.TokenSessionStore;
 import org.dsgroup.journeycraft.common.enums.ResponseCodeEnum;
 import org.dsgroup.journeycraft.common.exception.BusinessException;
 import org.dsgroup.journeycraft.user.entity.User;
 import org.dsgroup.journeycraft.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -22,24 +19,17 @@ import java.time.LocalDateTime;
 import static com.baomidou.mybatisplus.core.toolkit.Wrappers.lambdaQuery;
 
 /**
- * 认证服务实现，负责注册、登录、登出和 token 刷新。
+ * 认证服务实现，负责注册、登录（用户名认证，无需 token）。
  */
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
     private final UserMapper userMapper;
-    private final TokenSessionStore tokenSessionStore;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    @Value("${jwt.expiration:86400000}")
-    private long tokenExpiresInMillis;
-
-    @Value("${jwt.refresh-expiration:604800000}")
-    private long refreshTokenExpiresInMillis;
-
     /**
-     * 登录校验并签发 token。
+     * 登录校验并返回用户 ID。
      */
     @Override
     public AuthLoginRspVO login(LoginReqVO reqVO) {
@@ -56,7 +46,12 @@ public class AuthServiceImpl implements AuthService {
         if (user.getStatus() != null && user.getStatus() == 0) {
             throw new BusinessException(ResponseCodeEnum.FORBIDDEN, "账号已禁用");
         }
-        return buildTokenResponse(user);
+        AuthLoginRspVO rsp = new AuthLoginRspVO();
+        rsp.setUserId(user.getId());
+        rsp.setUsername(user.getUsername());
+        rsp.setNickname(user.getNickname());
+        rsp.setAvatarUrl(user.getAvatarUrl());
+        return rsp;
     }
 
     /**
@@ -91,58 +86,18 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 注销当前登录态。
+     * 注销（用户名认证模式，无需操作）。
      */
     @Override
     public void logout(String authorization) {
-        tokenSessionStore.invalidate(authorization);
+        // 用户名认证模式：无需 token 注销操作
     }
 
     /**
-     * 根据 refreshToken 重新签发 token。
+     * 刷新（用户名认证模式，无需刷新）。
      */
     @Override
     public AuthLoginRspVO refreshToken(RefreshTokenReqVO reqVO) {
-        TokenSessionStore.TokenPair tokenPair = tokenSessionStore.refresh(
-                reqVO.getRefreshToken(),
-                tokenExpiresInMillis / 1000,
-                refreshTokenExpiresInMillis / 1000
-        );
-        Long userId = tokenSessionStore.requireUserId("Bearer " + tokenPair.accessToken());
-        User user = userMapper.selectById(userId);
-        if (user == null) {
-            throw new BusinessException(ResponseCodeEnum.USER_NOT_FOUND, "用户不存在");
-        }
-        return buildTokenResponse(user, tokenPair);
-    }
-
-    /**
-     * 按默认过期时间生成 token 响应。
-     */
-    private AuthLoginRspVO buildTokenResponse(User user) {
-        TokenSessionStore.TokenPair tokenPair = tokenSessionStore.issue(
-                user.getId(),
-                tokenExpiresInMillis / 1000,
-                refreshTokenExpiresInMillis / 1000
-        );
-        return buildTokenResponse(user, tokenPair);
-    }
-
-    /**
-     * 组装登录响应对象。
-     */
-    private AuthLoginRspVO buildTokenResponse(User user, TokenSessionStore.TokenPair tokenPair) {
-        AuthUserRspVO userRspVO = new AuthUserRspVO();
-        userRspVO.setId(user.getId());
-        userRspVO.setUsername(user.getUsername());
-        userRspVO.setNickname(user.getNickname());
-        userRspVO.setAvatarUrl(user.getAvatarUrl());
-
-        AuthLoginRspVO rspVO = new AuthLoginRspVO();
-        rspVO.setToken(tokenPair.accessToken());
-        rspVO.setRefreshToken(tokenPair.refreshToken());
-        rspVO.setExpiresIn((int) tokenPair.expiresInSeconds());
-        rspVO.setUser(userRspVO);
-        return rspVO;
+        throw new BusinessException(ResponseCodeEnum.UNAUTHORIZED, "用户名认证模式不支持 token 刷新");
     }
 }

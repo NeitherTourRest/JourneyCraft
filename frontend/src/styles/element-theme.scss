@@ -1,13 +1,164 @@
-// Element Plus CSS Variable Overrides — JourneyCraft Travel Theme
+// Element Plus CSS Variable Overrides — JourneyCraft Sketch Style
+// Dashed borders, hard shadows, small border-radius, paper background
+// Uses design tokens from variables.scss as single source of truth
 @use './variables.scss' as *;
 
 :root {
+  // ============================================================
+  // Primary Color — Pencil Gray
+  // ============================================================
   --el-color-primary: #{$color-primary};
-  --el-color-primary-light-3: #{$color-primary-light};
-  --el-color-primary-dark-2: #{$color-primary-dark};
+  --el-color-primary-light-3: #{$color-primary-light-3};
+  --el-color-primary-light-5: #{$color-primary-light-5};
+  --el-color-primary-light-7: #{$color-primary-light-7};
+  --el-color-primary-light-8: #{$color-primary-light-8};
+  --el-color-primary-light-9: #{$color-primary-light-9};
+  --el-color-primary-dark-2: #{$color-primary-dark-2};
 
+  // ============================================================
+  // Status Colors — Muted sketch palette
+  // ============================================================
   --el-color-success: #{$color-success};
   --el-color-warning: #{$color-warning};
   --el-color-danger: #{$color-danger};
   --el-color-info: #{$color-info};
+
+  // ============================================================
+  // Text Colors — Pencil Gray Scale
+  // ============================================================
+  --el-text-color-primary: #{$color-text-primary};
+  --el-text-color-regular: #{$color-text-regular};
+  --el-text-color-secondary: #{$color-text-secondary};
+  --el-text-color-placeholder: #{$color-text-muted};
+  --el-text-color-disabled: #{$color-text-disabled};
+
+  // ============================================================
+  // Background Colors — Paper Tones
+  // ============================================================
+  --el-bg-color: #{$color-bg};
+  --el-bg-color-page: #{$color-bg-page};
+  --el-bg-color-overlay: #{$color-bg-overlay};
+  --el-fill-color: #{$color-bg-secondary};
+  --el-fill-color-light: #{$color-bg};
+  --el-fill-color-lighter: #{$color-bg-page};
+
+  // ============================================================
+  // Border — Dashed pencil stroke
+  // ============================================================
+  --el-border-color: #{$color-border};
+  --el-border-color-light: #{$color-border-light};
+  --el-border-color-dark: #{$color-border-dark};
+  --el-border-width: 2px;
+  --el-border-style: dashed;
+  --el-border-color-hover: #{$color-primary};
+  --el-border: 2px dashed #{$color-border};
+
+  // ============================================================
+  // Border Radius — Small, sketchy
+  // ============================================================
+  --el-border-radius-base: #{$radius-base};
+  --el-border-radius-small: #{$radius-sm};
+  --el-border-radius-round: #{$radius-round};
+  --el-border-radius-circle: 50%;
+
+  // ============================================================
+  // Box Shadows — Hard offset, no blur
+  // ============================================================
+  --el-box-shadow-lighter: #{$shadow-sm};
+  --el-box-shadow-light: #{$shadow-base};
+  --el-box-shadow: #{$shadow-lg};
+  --el-box-shadow-dark: #{$shadow-xl};
+
+  // ============================================================
+  // Typography
+  // ============================================================
+  --el-font-size-extra-large: #{$font-xxl};
+  --el-font-size-large: #{$font-xl};
+  --el-font-size-medium: #{$font-lg};
+  --el-font-size-base: #{$font-base};
+  --el-font-size-small: #{$font-sm};
+  --el-font-size-extra-small: #{$font-xs};
+
+  --el-font-weight-primary: #{$weight-semibold};
+  --el-font-line-height-primary: 1.5;
+
+  // ============================================================
+  // Transitions — Fast sketch feel
+  // ============================================================
+  --el-transition-duration: 0.15s;
+
+  // ============================================================
+  // Button — Solid bg, no gradient, sketch feel
+  // ============================================================
+  --el-button-bg-color: #{$color-primary};
+  --el-button-hover-bg-color: #{$color-primary-light-3};
+  --el-button-active-bg-color: #{$color-primary-dark-2};
+  --el-button-text-color: #{$color-bg-light};
+  --el-button-hover-text-color: #{$color-bg-light};
+  --el-button-active-text-color: #{$color-bg-light};
+  --el-button-border-color: #{$color-primary};
+  --el-button-hover-border-color: #{$color-primary};
+  --el-button-active-border-color: #{$color-primary-dark-2};
+  --el-button-border-radius: #{$radius-base};
+  --el-button-font-weight: #{$weight-semibold};
+  --el-button-hover-link-text-color: #{$color-primary-light-3};
+
+  // ============================================================
+  // Card — Sketch Paper Card
+  // ============================================================
+  --el-card-border-radius: #{$radius-base};
+  --el-card-border-color: #{$color-border};
+  --el-card-padding: #{$spacing-lg};
+  --el-card-bg-color: #{$color-bg};
+
+  // ============================================================
+  // Input — Warm Paper Background
+  // ============================================================
+  --el-input-border-radius: #{$radius-base};
+  --el-input-border-color: #{$color-border};
+  --el-input-hover-border-color: #{$color-primary-light-3};
+  --el-input-focus-border-color: #{$color-primary};
+  --el-input-focus-border: #{$color-primary};
+  --el-input-bg-color: #{$color-bg};
+  --el-input-placeholder-color: #{$color-text-muted};
+
+  // ============================================================
+  // Tag
+  // ============================================================
+  --el-tag-border-radius: #{$radius-sm};
+
+  // ============================================================
+  // Dialog
+  // ============================================================
+  --el-dialog-border-radius: #{$radius-base};
+  --el-dialog-padding-primary: #{$spacing-xl};
+
+  // ============================================================
+  // Menu
+  // ============================================================
+  --el-menu-bg-color: #{$color-bg};
+  --el-menu-hover-bg-color: #{$color-bg-secondary};
+  --el-menu-active-color: #{$color-primary};
+  --el-menu-item-height: 48px;
+  --el-menu-border-color: #{$color-border};
+
+  // ============================================================
+  // Popper / Tooltip / Popover
+  // ============================================================
+  --el-popover-border-radius: #{$radius-base};
+
+  // ============================================================
+  // Table
+  // ============================================================
+  --el-table-border-radius: #{$radius-base};
+
+  // ============================================================
+  // Tabs
+  // ============================================================
+  --el-tabs-header-height: 44px;
+
+  // ============================================================
+  // Loading / Spinner
+  // ============================================================
+  --el-loading-spinner-color: #{$color-primary};
 }
